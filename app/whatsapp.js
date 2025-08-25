@@ -66,6 +66,16 @@ async function getStatus(companySlug) {
   return { connected: false, qrCode: sessions[companySlug].qrCode };
 }
 
+// Função para verificar status SEM criar sessão (para validação antes de envio)
+function checkConnectionStatus(companySlug) {
+  // Apenas verifica se existe uma sessão ativa, sem criar browser
+  if (sessions[companySlug] && sessions[companySlug].ready) {
+    return { connected: true };
+  }
+  
+  return { connected: false };
+}
+
 // Função para criar uma nova sessão
 async function createSession(companySlug) {
   const client = new Client({
@@ -202,6 +212,7 @@ function clearSession(companySlug) {
 
 module.exports = { 
   getStatus, 
+  checkConnectionStatus,
   sendMessage, 
   getClient,
   clearSession

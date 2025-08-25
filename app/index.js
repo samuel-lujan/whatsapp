@@ -121,8 +121,8 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
   }
 
   try {
-    // Verifica se a empresa está conectada antes de enviar
-    const status = await whatsapp.getStatus(companySlug);
+    // Verifica se a empresa está conectada antes de enviar (SEM abrir browser)
+    const status = whatsapp.checkConnectionStatus(companySlug);
     
     if (!status.connected) {
       const errorMessage = `Empresa ${companySlug} não está conectada ao WhatsApp`;
@@ -130,16 +130,14 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
       rollbar.warning(errorMessage, { 
         companySlug, 
         route: '/send-message/:companySlug',
-        action: 'company_not_connected',
-        qrCodeAvailable: !!status.qrCode
+        action: 'company_not_connected'
       });
       
       return res.status(422).json({
         error: "Empresa não conectada",
         message: `A empresa ${companySlug} não está conectada ao WhatsApp`,
         companySlug,
-        suggestion: `Conecte a empresa primeiro acessando: /status/${companySlug}`,
-        qrCodeAvailable: !!status.qrCode
+        suggestion: `Conecte a empresa primeiro acessando: /status/${companySlug}`
       });
     }
 
