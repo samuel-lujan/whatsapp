@@ -78,11 +78,27 @@ function checkConnectionStatus(companySlug) {
 
 // Função para criar uma nova sessão
 async function createSession(companySlug) {
+  // Detecta ambiente para configurar o modo do browser
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isHeadless = isProduction || process.env.HEADLESS === 'true';
+  
+  console.log(`🖥️ Ambiente: ${isProduction ? 'PRODUÇÃO' : 'DESENVOLVIMENTO'}`);
+  console.log(`🌐 Browser: ${isHeadless ? 'HEADLESS (sem interface)' : 'COM INTERFACE'}`);
+  
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: companySlug }),
     puppeteer: { 
-      headless: false, // Para desenvolvimento - permite ver o WhatsApp Web
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+      headless: isHeadless,
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process', // Para ambientes com recursos limitados
+        '--disable-gpu'
+      ]
     }
   });
 
