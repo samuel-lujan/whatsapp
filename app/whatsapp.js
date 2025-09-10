@@ -3,11 +3,41 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const sessions = {};
 
 async function getStatus(companySlug) {
+  // PRIMEIRA VERIFICAÇÃO: Se já existe uma sessão conectada
   if (sessions[companySlug] && sessions[companySlug].ready) {
     console.log(`✅ Cliente ${companySlug} já está conectado - não precisa de QR Code`);
     return { connected: true };
   }
   
+  // SEGUNDA VERIFICAÇÃO: Se existe sessão mas não está marcada como ready, vamos testar diretamente
+  if (sessions[companySlug] && sessions[companySlug].client) {
+    console.log(`🔍 Verificando estado real do cliente ${companySlug}...`);
+    
+    try {
+      // Tenta uma operação que só funciona se estiver conectado
+      const client = sessions[companySlug].client;
+      const info = await Promise.race([
+        client.getState(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+      ]);
+      
+      console.log(`📱 Estado atual do cliente ${companySlug}:`, info);
+      
+      if (info === 'CONNECTED') {
+        console.log(`🔧 Cliente ${companySlug} estava conectado mas não marcado como ready - corrigindo...`);
+        sessions[companySlug].ready = true;
+        sessions[companySlug].connecting = false;
+        sessions[companySlug].qrCode = null;
+        return { connected: true };
+      }
+      
+    } catch (error) {
+      console.log(`⚠️ Cliente ${companySlug} não está realmente conectado:`, error.message);
+      // Continua com o fluxo normal
+    }
+  }
+  
+  // TERCEIRA VERIFICAÇÃO: Se está conectando
   if (sessions[companySlug] && sessions[companySlug].connecting && !sessions[companySlug].ready) {
     console.log(`⏳ Cliente ${companySlug} ainda está conectando...`);
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -27,6 +57,7 @@ async function getStatus(companySlug) {
     }
   }
 
+  // QUARTA VERIFICAÇÃO: Só cria nova sessão se realmente não existe
   if (!sessions[companySlug]) {
     console.log(`🆕 Nenhuma sessão encontrada para ${companySlug} - criando nova...`);
     try {
@@ -45,6 +76,7 @@ async function getStatus(companySlug) {
     }
   }
 
+  // VERIFICAÇÃO FINAL
   if (sessions[companySlug] && sessions[companySlug].ready) {
     console.log(`✅ Cliente ${companySlug} conectou durante o processo`);
     return { connected: true };
@@ -52,6 +84,12 @@ async function getStatus(companySlug) {
 
   const qrCode = sessions[companySlug] ? sessions[companySlug].qrCode : null;
   console.log(`📱 Retornando status para ${companySlug} - QR Code: ${qrCode ? 'Disponível' : 'Não disponível'}`);
+  console.log(`🔍 Estado da sessão ${companySlug}:`, {
+    exists: !!sessions[companySlug],
+    ready: sessions[companySlug] ? sessions[companySlug].ready : false,
+    connecting: sessions[companySlug] ? sessions[companySlug].connecting : false,
+    hasQrCode: !!qrCode
+  });
   
   return { 
     connected: false, 
@@ -65,9 +103,27 @@ function hasActiveSession(companySlug) {
 }
 
 function checkConnectionStatus(companySlug) {
+  // Verificação básica primeiro
   if (sessions[companySlug] && sessions[companySlug].ready) {
     console.log(`✅ Verificação rápida: Cliente ${companySlug} está pronto`);
     return { connected: true };
+  }
+  
+  // Se existe sessão mas não está marcada como ready, vamos investigar
+  if (sessions[companySlug] && sessions[companySlug].client) {
+    console.log(`🔍 Verificação rápida: Cliente ${companySlug} existe mas não está marcado como ready`);
+    
+    // Tenta uma verificação síncrona básica
+    try {
+      const client = sessions[companySlug].client;
+      // Se o cliente tem pupPage e não está fechado, pode estar conectado
+      if (client.pupPage && !client.pupPage.isClosed()) {
+        console.log(`🤔 Cliente ${companySlug} pode estar conectado - recomendado verificação completa`);
+        return { connected: false, status: 'needs_verification' };
+      }
+    } catch (e) {
+      console.log(`⚠️ Erro na verificação rápida do cliente ${companySlug}:`, e.message);
+    }
   }
   
   if (sessions[companySlug] && sessions[companySlug].connecting) {
@@ -113,6 +169,13 @@ async function createSession(companySlug) {
   client.on('qr', (qr) => {
     console.log(`QR Code gerado para empresa: ${companySlug}`);
     sessions[companySlug].qrCode = qr;
+  });
+
+  client.on('authenticated', (session) => {
+    console.log(`🔐 Cliente ${companySlug} autenticado - sessão salva`);
+    if (sessions[companySlug]) {
+      sessions[companySlug].connecting = false; // Já foi autenticado
+    }
   });
 
   client.on('ready', async () => {
@@ -258,6 +321,47 @@ function clearSession(companySlug) {
   return false;
 }
 
+// Função para debug - força verificação do estado real
+async function debugSessionState(companySlug) {
+  if (!sessions[companySlug]) {
+    return { exists: false, message: 'Sessão não existe' };
+  }
+  
+  const session = sessions[companySlug];
+  const debug = {
+    exists: true,
+    ready: session.ready,
+    connecting: session.connecting,
+    hasQrCode: !!session.qrCode,
+    hasClient: !!session.client,
+    lastBatteryUpdate: session.lastBatteryUpdate || null
+  };
+  
+  if (session.client) {
+    try {
+      const state = await Promise.race([
+        session.client.getState(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+      ]);
+      debug.realState = state;
+      debug.isReallyConnected = state === 'CONNECTED';
+      
+      if (state === 'CONNECTED' && !session.ready) {
+        console.log(`🔧 CORREÇÃO: Marcando ${companySlug} como conectado`);
+        session.ready = true;
+        session.connecting = false;
+        session.qrCode = null;
+      }
+      
+    } catch (error) {
+      debug.realState = 'ERROR';
+      debug.error = error.message;
+    }
+  }
+  
+  return debug;
+}
+
 // Função para listar todas as sessões (para debug)
 function listSessions() {
   const sessionList = {};
@@ -276,6 +380,7 @@ module.exports = {
   getStatus, 
   checkConnectionStatus,
   hasActiveSession,
+  debugSessionState,
   sendMessage, 
   getClient,
   clearSession,

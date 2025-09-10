@@ -222,6 +222,26 @@ app.get("/companies", authenticateToken, (req, res) => {
   }
 });
 
+// Rota para debug de sessão específica
+app.get("/debug/:companySlug", authenticateToken, async (req, res) => {
+  const { companySlug } = req.params;
+  try {
+    console.log(`🔍 Debug da sessão: ${companySlug}`);
+    const debugInfo = await whatsapp.debugSessionState(companySlug);
+    res.json({
+      companySlug,
+      debug: debugInfo,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: error.message,
+      companySlug,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Rota para forçar limpeza de sessão (para debug)
 app.delete("/clear/:companySlug", authenticateToken, (req, res) => {
   const { companySlug } = req.params;
@@ -243,13 +263,15 @@ app.listen(PORT, () => {
   console.log(`GET  /status/:companySlug - Verificar status e obter QR Code`);
   console.log(`POST /send-message/:companySlug - Enviar mensagem`);
   console.log(`GET  /companies - Listar empresas conectadas`);
+  console.log(`GET  /debug/:companySlug - Debug de sessão específica (NEW!)`);
   console.log(`DELETE /clear/:companySlug - Limpar sessão específica`);
   console.log(`\n🔧 Melhorias implementadas:`);
   console.log(`   ✅ Detecção inteligente de sessões já conectadas`);
   console.log(`   ✅ Evita regeneração de QR Code desnecessária`);
-  console.log(`   ✅ Verificação rápida de status antes de operações completas`);
+  console.log(`   ✅ Verificação robusta do estado real da conexão`);
+  console.log(`   ✅ Correção automática de estados inconsistentes`);
   console.log(`   ✅ Melhor tratamento de erros e timeouts`);
-  console.log(`   ✅ Debug melhorado com logs detalhados`);
+  console.log(`   ✅ Debug avançado com logs detalhados`);
   console.log(`\nPressione Ctrl+C para parar o servidor`);
 });
 
