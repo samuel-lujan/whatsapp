@@ -1,84 +1,85 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
-// Armazena as sessões por companySlug
 const sessions = {};
 
-// Função para obter status da empresa
 async function getStatus(companySlug) {
-  // Se já existe uma sessão e está conectada
   if (sessions[companySlug] && sessions[companySlug].ready) {
-    // Verificação rigorosa de conectividade - tenta uma operação real
-    try {
-      const client = sessions[companySlug].client;
-      
-      // Tenta obter informações do próprio número para verificar se está conectado
-      const info = await Promise.race([
-        client.info,
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout na verificação')), 5000)
-        )
-      ]);
-      
-      if (!info || !info.wid) {
-        throw new Error('Cliente não possui informações válidas');
-      }
-      
-      console.log(`✅ Cliente ${companySlug} está conectado (${info.wid._serialized})`);
-      return { connected: true };
-      
-    } catch (error) {
-      console.log(`❌ Cliente ${companySlug} perdeu conexão:`, error.message);
-      
-      // Marca como não conectado e limpa a sessão
-      sessions[companySlug].ready = false;
-      sessions[companySlug].qrCode = null;
-      
-      // Tenta destruir o cliente antigo
-      try {
-        await sessions[companySlug].client.destroy();
-        console.log(`🗑️ Cliente ${companySlug} destruído`);
-      } catch (destroyError) {
-        console.log(`⚠️ Erro ao destruir cliente ${companySlug}:`, destroyError.message);
-      }
-      
-      // Remove a sessão para forçar recriação
-      delete sessions[companySlug];
-      console.log(`🔄 Recriando sessão para ${companySlug}...`);
-    }
-  }
-
-  // Se não existe, cria uma nova sessão
-  if (!sessions[companySlug]) {
-    console.log(`🆕 Criando nova sessão para ${companySlug}...`);
-    await createSession(companySlug);
-  }
-
-  // Se ainda não tem QR Code, aguarda ser gerado
-  if (!sessions[companySlug].qrCode && !sessions[companySlug].ready) {
-    console.log(`⏳ Aguardando QR Code para ${companySlug}...`);
-    await waitForQrCode(companySlug);
-  }
-
-  if (sessions[companySlug].ready) {
-    return { connected: true };
-  }
-
-  return { connected: false, qrCode: sessions[companySlug].qrCode };
-}
-
-// Função para verificar status SEM criar sessão (para validação antes de envio)
-function checkConnectionStatus(companySlug) {
-  // Apenas verifica se existe uma sessão ativa, sem criar browser
-  if (sessions[companySlug] && sessions[companySlug].ready) {
+    console.log(`✅ Cliente ${companySlug} já está conectado - não precisa de QR Code`);
     return { connected: true };
   }
   
+  if (sessions[companySlug] && sessions[companySlug].connecting && !sessions[companySlug].ready) {
+    console.log(`⏳ Cliente ${companySlug} ainda está conectando...`);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    if (sessions[companySlug] && sessions[companySlug].ready) {
+      console.log(`✅ Cliente ${companySlug} finalizou conexão durante a espera`);
+      return { connected: true };
+    }
+    
+    if (sessions[companySlug] && sessions[companySlug].qrCode) {
+      console.log(`📱 Cliente ${companySlug} ainda conectando - QR Code disponível`);
+      return { 
+        connected: false, 
+        qrCode: sessions[companySlug].qrCode,
+        status: 'connecting'
+      };
+    }
+  }
+
+  if (!sessions[companySlug]) {
+    console.log(`🆕 Nenhuma sessão encontrada para ${companySlug} - criando nova...`);
+    try {
+      await createSession(companySlug);
+      
+      console.log(`⏳ Aguardando QR Code ou conexão automática para ${companySlug}...`);
+      await waitForQrCode(companySlug, 20000); // 20 segundos
+      
+    } catch (error) {
+      console.log(`⚠️ Erro ao criar sessão/aguardar QR Code para ${companySlug}:`, error.message);
+      return { 
+        connected: false, 
+        error: error.message,
+        suggestion: "Tente novamente - o WhatsApp pode estar inicializando" 
+      };
+    }
+  }
+
+  if (sessions[companySlug] && sessions[companySlug].ready) {
+    console.log(`✅ Cliente ${companySlug} conectou durante o processo`);
+    return { connected: true };
+  }
+
+  const qrCode = sessions[companySlug] ? sessions[companySlug].qrCode : null;
+  console.log(`📱 Retornando status para ${companySlug} - QR Code: ${qrCode ? 'Disponível' : 'Não disponível'}`);
+  
+  return { 
+    connected: false, 
+    qrCode: qrCode,
+    message: qrCode ? "Escaneie o QR Code para conectar" : "Aguardando QR Code..."
+  };
+}
+
+function hasActiveSession(companySlug) {
+  return sessions[companySlug] && (sessions[companySlug].ready || sessions[companySlug].connecting);
+}
+
+function checkConnectionStatus(companySlug) {
+  if (sessions[companySlug] && sessions[companySlug].ready) {
+    console.log(`✅ Verificação rápida: Cliente ${companySlug} está pronto`);
+    return { connected: true };
+  }
+  
+  if (sessions[companySlug] && sessions[companySlug].connecting) {
+    console.log(`⏳ Verificação rápida: Cliente ${companySlug} ainda conectando`);
+    return { connected: false, status: 'connecting' };
+  }
+  
+  console.log(`❌ Verificação rápida: Cliente ${companySlug} não conectado`);
   return { connected: false };
 }
 
-// Função para criar uma nova sessão
 async function createSession(companySlug) {
-  // Detecta ambiente para configurar o modo do browser
   const isProduction = process.env.NODE_ENV === 'production';
   const isHeadless = isProduction || process.env.HEADLESS === 'true';
   
@@ -96,7 +97,7 @@ async function createSession(companySlug) {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--single-process', // Para ambientes com recursos limitados
+        '--single-process',
         '--disable-gpu'
       ]
     }
@@ -114,10 +115,21 @@ async function createSession(companySlug) {
     sessions[companySlug].qrCode = qr;
   });
 
-  client.on('ready', () => {
+  client.on('ready', async () => {
     console.log(`✅ WhatsApp conectado para empresa: ${companySlug}`);
-    sessions[companySlug].ready = true;
-    sessions[companySlug].qrCode = null; // Limpa QR Code após conexão
+    if (sessions[companySlug]) {
+      sessions[companySlug].ready = true;
+      sessions[companySlug].connecting = false;
+      sessions[companySlug].qrCode = null; // Limpa QR Code após conexão
+      
+      // Tenta obter info do cliente para confirmar conexão
+      try {
+        const info = await client.info;
+        console.log(`📱 Cliente ${companySlug} conectado como: ${info.wid._serialized}`);
+      } catch (e) {
+        console.log(`⚠️ Cliente ${companySlug} conectado mas sem info detalhada`);
+      }
+    }
   });
 
   client.on('disconnected', (reason) => {
@@ -141,8 +153,19 @@ async function createSession(companySlug) {
     if (state === 'DISCONNECTED' || state === 'UNPAIRED' || state === 'UNLAUNCHED') {
       if (sessions[companySlug]) {
         sessions[companySlug].ready = false;
+        sessions[companySlug].connecting = false;
         sessions[companySlug].qrCode = null;
       }
+    }
+  });
+
+  // Captura erros do puppeteer/chrome
+  client.on('error', (error) => {
+    console.log(`❌ Erro no cliente ${companySlug}:`, error.message);
+    if (sessions[companySlug]) {
+      sessions[companySlug].ready = false;
+      sessions[companySlug].connecting = false;
+      sessions[companySlug].qrCode = null;
     }
   });
 
@@ -159,19 +182,28 @@ async function createSession(companySlug) {
 }
 
 // Função para aguardar QR Code ser gerado
-async function waitForQrCode(companySlug, timeout = 15000) {
+async function waitForQrCode(companySlug, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
-      reject(new Error('Timeout ao gerar QR Code'));
+      console.log(`⏰ Timeout ao aguardar QR Code para ${companySlug} após ${timeout/1000}s`);
+      reject(new Error(`Timeout ao gerar QR Code para ${companySlug}. Tente novamente.`));
     }, timeout);
 
     const interval = setInterval(() => {
-      if (sessions[companySlug].qrCode || sessions[companySlug].ready) {
+      if (sessions[companySlug] && (sessions[companySlug].qrCode || sessions[companySlug].ready)) {
         clearTimeout(timeoutId);
         clearInterval(interval);
+        console.log(`✅ QR Code gerado ou cliente conectado para ${companySlug}`);
         resolve();
       }
-    }, 500);
+      
+      // Verifica se a sessão foi perdida/removida
+      if (!sessions[companySlug]) {
+        clearTimeout(timeoutId);
+        clearInterval(interval);
+        reject(new Error(`Sessão ${companySlug} foi removida durante a espera`));
+      }
+    }, 1000); // Verifica a cada 1 segundo ao invés de 500ms
   });
 }
 
@@ -226,10 +258,26 @@ function clearSession(companySlug) {
   return false;
 }
 
+// Função para listar todas as sessões (para debug)
+function listSessions() {
+  const sessionList = {};
+  for (const [companySlug, session] of Object.entries(sessions)) {
+    sessionList[companySlug] = {
+      ready: session.ready,
+      connecting: session.connecting,
+      hasQrCode: !!session.qrCode,
+      lastBatteryUpdate: session.lastBatteryUpdate || null
+    };
+  }
+  return sessionList;
+}
+
 module.exports = { 
   getStatus, 
   checkConnectionStatus,
+  hasActiveSession,
   sendMessage, 
   getClient,
-  clearSession
+  clearSession,
+  listSessions
 };
