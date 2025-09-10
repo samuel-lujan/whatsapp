@@ -165,23 +165,32 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
   }
 
   try {
-    // Verifica se a empresa está conectada antes de enviar (SEM abrir browser)
-    const status = whatsapp.checkConnectionStatus(companySlug);
+    // Verifica se a empresa está conectada antes de enviar
+    const quickStatus = whatsapp.checkConnectionStatus(companySlug);
     
-    if (!status.connected) {
-      const errorMessage = `Empresa ${companySlug} não está conectada ao WhatsApp`;
+    if (!quickStatus.connected) {
+      let errorMessage = `Empresa ${companySlug} não está conectada ao WhatsApp`;
+      let suggestion = `Conecte a empresa primeiro acessando: /status/${companySlug}`;
+      
+      if (quickStatus.status === 'needs_verification') {
+        errorMessage = `Empresa ${companySlug} precisa de verificação de conexão`;
+        suggestion = quickStatus.suggestion || suggestion;
+      }
+      
       console.error(errorMessage);
       rollbar.warning(errorMessage, { 
         companySlug, 
         route: '/send-message/:companySlug',
-        action: 'company_not_connected'
+        action: 'company_not_connected',
+        status: quickStatus.status
       });
       
       return res.status(422).json({
         error: "Empresa não conectada",
-        message: `A empresa ${companySlug} não está conectada ao WhatsApp`,
+        message: errorMessage,
         companySlug,
-        suggestion: `Conecte a empresa primeiro acessando: /status/${companySlug}`
+        status: quickStatus.status || 'disconnected',
+        suggestion
       });
     }
 
@@ -190,19 +199,29 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
     console.log(`Número original: ${number}, Número formatado: ${formattedNumber}`);
     
     const result = await whatsapp.sendMessage(companySlug, formattedNumber, message);
-    console.log(`Mensagem enviada pela empresa ${companySlug} para ${formattedNumber}`);
+    console.log(`✅ Mensagem enviada pela empresa ${companySlug} para ${formattedNumber}`);
     res.status(200).json({
       ...result,
       originalNumber: number,
       formattedNumber: formattedNumber
     });
   } catch (err) {
-    console.error(`Erro ao enviar mensagem pela empresa ${companySlug}:`, err.message);
+    console.error(`❌ Erro ao enviar mensagem pela empresa ${companySlug}:`, err.message);
     rollbar.error(err, { companySlug, number, route: '/send-message/:companySlug' });
-    res.status(500).json({ 
+    
+    // Determina o status code baseado no tipo de erro
+    let statusCode = 500;
+    if (err.message.includes('perdeu conexão') || err.message.includes('não está conectada')) {
+      statusCode = 422;
+    }
+    
+    res.status(statusCode).json({ 
       error: err.message,
       companySlug,
-      suggestion: `Verifique se a empresa ${companySlug} está conectada em /status/${companySlug}`
+      originalNumber: number,
+      suggestion: err.message.includes('/status/') 
+        ? "Reconecte usando a rota /status" 
+        : `Verifique se a empresa ${companySlug} está conectada em /status/${companySlug}`
     });
   }
 });
@@ -242,6 +261,31 @@ app.get("/debug/:companySlug", authenticateToken, async (req, res) => {
   }
 });
 
+// Rota para verificar saúde específica de um cliente
+app.get("/health/:companySlug", authenticateToken, async (req, res) => {
+  const { companySlug } = req.params;
+  try {
+    console.log(`🩺 Verificando saúde do cliente: ${companySlug}`);
+    const healthCheck = await whatsapp.verifyClientHealth(companySlug);
+    res.json({
+      companySlug,
+      health: healthCheck,
+      timestamp: new Date().toISOString(),
+      recommendation: healthCheck.healthy 
+        ? "Cliente está funcionando normalmente" 
+        : healthCheck.shouldReconnect 
+          ? `Reconecte usando /status/${companySlug}` 
+          : "Verifique os logs para mais detalhes"
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: error.message,
+      companySlug,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Rota para forçar limpeza de sessão (para debug)
 app.delete("/clear/:companySlug", authenticateToken, (req, res) => {
   const { companySlug } = req.params;
@@ -263,15 +307,16 @@ app.listen(PORT, () => {
   console.log(`GET  /status/:companySlug - Verificar status e obter QR Code`);
   console.log(`POST /send-message/:companySlug - Enviar mensagem`);
   console.log(`GET  /companies - Listar empresas conectadas`);
-  console.log(`GET  /debug/:companySlug - Debug de sessão específica (NEW!)`);
+  console.log(`GET  /debug/:companySlug - Debug de sessão específica`);
+  console.log(`GET  /health/:companySlug - Verificar saúde do cliente (NEW!)`);
   console.log(`DELETE /clear/:companySlug - Limpar sessão específica`);
   console.log(`\n🔧 Melhorias implementadas:`);
   console.log(`   ✅ Detecção inteligente de sessões já conectadas`);
-  console.log(`   ✅ Evita regeneração de QR Code desnecessária`);
   console.log(`   ✅ Verificação robusta do estado real da conexão`);
+  console.log(`   ✅ Verificação de saúde antes de enviar mensagens`);
   console.log(`   ✅ Correção automática de estados inconsistentes`);
-  console.log(`   ✅ Melhor tratamento de erros e timeouts`);
-  console.log(`   ✅ Debug avançado com logs detalhados`);
+  console.log(`   ✅ Tratamento específico de erros de conexão perdida`);
+  console.log(`   ✅ Debug avançado e monitoramento de saúde`);
   console.log(`\nPressione Ctrl+C para parar o servidor`);
 });
 

@@ -22,5 +22,6 @@ jobs:
           args: |
             cd /var/www/whatsapp
             git pull origin master
+            npm install
             pm2 restart all
             exit

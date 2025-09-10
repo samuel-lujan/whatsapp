@@ -119,7 +119,7 @@ function checkConnectionStatus(companySlug) {
       // Se o cliente tem pupPage e não está fechado, pode estar conectado
       if (client.pupPage && !client.pupPage.isClosed()) {
         console.log(`🤔 Cliente ${companySlug} pode estar conectado - recomendado verificação completa`);
-        return { connected: false, status: 'needs_verification' };
+        return { connected: false, status: 'needs_verification', suggestion: 'Use /status para verificação completa' };
       }
     } catch (e) {
       console.log(`⚠️ Erro na verificação rápida do cliente ${companySlug}:`, e.message);
@@ -270,10 +270,79 @@ async function waitForQrCode(companySlug, timeout = 30000) {
   });
 }
 
-// Função para enviar mensagem
+// Função para verificar se o cliente está realmente funcional
+async function verifyClientHealth(companySlug) {
+  if (!sessions[companySlug] || !sessions[companySlug].client) {
+    return { healthy: false, reason: 'Sessão não existe' };
+  }
+  
+  const client = sessions[companySlug].client;
+  
+  try {
+    // Tenta várias verificações para garantir que está funcionando
+    const checks = await Promise.all([
+      // Verifica estado
+      Promise.race([
+        client.getState(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-state')), 3000))
+      ]),
+      
+      // Tenta obter informações básicas
+      Promise.race([
+        client.info,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-info')), 3000))
+      ]).catch(() => null) // Não falha se info não estiver disponível
+    ]);
+    
+    const [state, info] = checks;
+    
+    if (state !== 'CONNECTED') {
+      console.log(`⚠️ Cliente ${companySlug} não está no estado CONNECTED (atual: ${state})`);
+      return { 
+        healthy: false, 
+        reason: `Estado inválido: ${state}`,
+        shouldReconnect: true 
+      };
+    }
+    
+    console.log(`✅ Cliente ${companySlug} passou na verificação de saúde`);
+    return { 
+      healthy: true, 
+      state, 
+      info: info ? info.wid._serialized : 'N/A' 
+    };
+    
+  } catch (error) {
+    console.log(`❌ Cliente ${companySlug} falhou na verificação de saúde:`, error.message);
+    return { 
+      healthy: false, 
+      reason: error.message,
+      shouldReconnect: true 
+    };
+  }
+}
+
+// Função para enviar mensagem com verificação robusta
 async function sendMessage(companySlug, number, message) {
   if (!sessions[companySlug] || !sessions[companySlug].ready) {
     throw new Error(`Empresa ${companySlug} não está conectada ao WhatsApp`);
+  }
+
+  // PRIMEIRA TENTATIVA: Verifica a saúde do cliente antes de enviar
+  console.log(`🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`);
+  const healthCheck = await verifyClientHealth(companySlug);
+  
+  if (!healthCheck.healthy) {
+    console.log(`⚠️ Cliente ${companySlug} não está saudável:`, healthCheck.reason);
+    
+    // Marca como não conectado para forçar reconexão
+    sessions[companySlug].ready = false;
+    
+    if (healthCheck.shouldReconnect) {
+      throw new Error(`Cliente ${companySlug} perdeu conexão. Erro: ${healthCheck.reason}. Acesse /status/${companySlug} para reconectar.`);
+    } else {
+      throw new Error(`Cliente ${companySlug} não está funcional: ${healthCheck.reason}`);
+    }
   }
 
   try {
@@ -281,7 +350,17 @@ async function sendMessage(companySlug, number, message) {
     const chatId = number.includes('@c.us') ? number : `${number.replace(/\D/g, '')}@c.us`;
     
     const client = sessions[companySlug].client;
-    await client.sendMessage(chatId, message);
+    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`);
+    
+    // Envia com timeout para evitar travamento
+    await Promise.race([
+      client.sendMessage(chatId, message),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout ao enviar mensagem - cliente pode ter desconectado')), 15000)
+      )
+    ]);
+    
+    console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`);
     
     return {
       success: true,
@@ -293,7 +372,21 @@ async function sendMessage(companySlug, number, message) {
         timestamp: new Date().toISOString()
       }
     };
+    
   } catch (error) {
+    console.error(`❌ Erro ao enviar mensagem pelo cliente ${companySlug}:`, error.message);
+    
+    // Se houve erro, marca como não conectado
+    if (sessions[companySlug]) {
+      sessions[companySlug].ready = false;
+      console.log(`🔄 Marcando cliente ${companySlug} como não conectado devido a erro no envio`);
+    }
+    
+    // Retorna erro mais específico
+    if (error.message.includes('getChat') || error.message.includes('Cannot read properties')) {
+      throw new Error(`Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`);
+    }
+    
     throw new Error(`Erro ao enviar mensagem: ${error.message}`);
   }
 }
@@ -380,6 +473,7 @@ module.exports = {
   getStatus, 
   checkConnectionStatus,
   hasActiveSession,
+  verifyClientHealth,
   debugSessionState,
   sendMessage, 
   getClient,
