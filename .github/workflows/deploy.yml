@@ -1,0 +1,26 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    name: DEPLOY
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy servidor Whatsapp
+        uses: maddox/actions/ssh@master
+        env:
+          PRIVATE_KEY: ${{ secrets.PASSWORD }}
+          HOST: ${{ secrets.HOST_DEPLOY }}
+          USER: ${{ secrets.USER_DEPLOY }}
+        with:
+          args: |
+            cd /var/www/whatsapp
+            git pull origin master
+            pm2 restart all
+            exit
