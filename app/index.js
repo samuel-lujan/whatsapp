@@ -83,24 +83,68 @@ function authenticateToken(req, res, next) {
 // Rota para verificar status da empresa e retornar QR Code se necessário
 app.get("/status/:companySlug", authenticateToken, async (req, res) => {
   const { companySlug } = req.params;
+  
   try {
-    const status = await whatsapp.getStatus(companySlug);
-    if (status.connected) {
-      console.log(`Empresa ${companySlug} está conectada`);
-      res.json({ connected: true });
-    } else {
-      console.log(`Empresa ${companySlug} não está conectada - gerando QR Code`);
-      // Exibe o QR Code no terminal em ASCII
-      if (status.qrCode) {
-        console.log(`\nQR Code para empresa ${companySlug}:`);
-        qrcodeTerminal.generate(status.qrCode, { small: true });
+    console.log(`📊 Verificando status da empresa: ${companySlug}`);
+    
+    // Primeiro verifica se já existe uma sessão ativa (rápido)
+    if (whatsapp.hasActiveSession(companySlug)) {
+      const quickStatus = whatsapp.checkConnectionStatus(companySlug);
+      if (quickStatus.connected) {
+        console.log(`⚡ Empresa ${companySlug} já conectada (verificação rápida)`);
+        return res.json({ 
+          connected: true, 
+          companySlug,
+          method: 'quick-check',
+          timestamp: new Date().toISOString()
+        });
       }
-      res.json({ connected: false, qrCode: status.qrCode });
+    }
+    
+    // Se não tem sessão ativa, faz verificação completa
+    const status = await whatsapp.getStatus(companySlug);
+    
+    if (status.connected) {
+      console.log(`✅ Empresa ${companySlug} está conectada`);
+      res.json({ 
+        connected: true, 
+        companySlug,
+        method: 'full-check',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      console.log(`⚠️ Empresa ${companySlug} não está conectada`);
+      
+      const response = { 
+        connected: false, 
+        companySlug,
+        timestamp: new Date().toISOString()
+      };
+      
+      if (status.qrCode) {
+        console.log(`📱 QR Code disponível para empresa ${companySlug}`);
+        // Exibe o QR Code no terminal em ASCII
+        qrcodeTerminal.generate(status.qrCode, { small: true });
+        response.qrCode = status.qrCode;
+        response.message = "Escaneie o QR Code com o WhatsApp para conectar";
+      } else if (status.error) {
+        response.error = status.error;
+        response.message = status.suggestion || "Erro ao gerar QR Code";
+      } else {
+        response.message = status.message || "Aguardando geração do QR Code...";
+      }
+      
+      res.json(response);
     }
   } catch (err) {
-    console.error(`Erro ao verificar status da empresa ${companySlug}:`, err.message);
+    console.error(`❌ Erro ao verificar status da empresa ${companySlug}:`, err.message);
     rollbar.error(err, { companySlug, route: '/status/:companySlug' });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ 
+      error: err.message,
+      companySlug,
+      timestamp: new Date().toISOString(),
+      suggestion: "Tente novamente em alguns segundos"
+    });
   }
 });
 
@@ -165,11 +209,17 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
 
 // Rota para listar empresas conectadas
 app.get("/companies", authenticateToken, (req, res) => {
-  // Esta funcionalidade pode ser implementada se necessário
-  res.json({ 
-    message: "Funcionalidade em desenvolvimento",
-    suggestion: "Use /status/:companySlug para verificar status de uma empresa específica"
-  });
+  try {
+    const sessions = whatsapp.listSessions();
+    res.json({ 
+      sessions,
+      total: Object.keys(sessions).length,
+      connected: Object.values(sessions).filter(s => s.ready).length,
+      connecting: Object.values(sessions).filter(s => s.connecting).length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Rota para forçar limpeza de sessão (para debug)
@@ -192,7 +242,14 @@ app.listen(PORT, () => {
   console.log(`\nRotas disponíveis:`);
   console.log(`GET  /status/:companySlug - Verificar status e obter QR Code`);
   console.log(`POST /send-message/:companySlug - Enviar mensagem`);
-  console.log(`GET  /companies - Listar empresas (em desenvolvimento)`);
+  console.log(`GET  /companies - Listar empresas conectadas`);
+  console.log(`DELETE /clear/:companySlug - Limpar sessão específica`);
+  console.log(`\n🔧 Melhorias implementadas:`);
+  console.log(`   ✅ Detecção inteligente de sessões já conectadas`);
+  console.log(`   ✅ Evita regeneração de QR Code desnecessária`);
+  console.log(`   ✅ Verificação rápida de status antes de operações completas`);
+  console.log(`   ✅ Melhor tratamento de erros e timeouts`);
+  console.log(`   ✅ Debug melhorado com logs detalhados`);
   console.log(`\nPressione Ctrl+C para parar o servidor`);
 });
 
