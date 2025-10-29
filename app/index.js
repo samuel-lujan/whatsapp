@@ -194,16 +194,14 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
       });
     }
 
-    // Limpa e valida o número do WhatsApp
-    const formattedNumber = formatWhatsAppNumber(number);
-    console.log(`Número original: ${number}, Número formatado: ${formattedNumber}`);
+    // Envia o número diretamente, sem formatação prévia
+    console.log(`Número recebido: ${number}`);
     
-    const result = await whatsapp.sendMessage(companySlug, formattedNumber, message);
-    console.log(`✅ Mensagem enviada pela empresa ${companySlug} para ${formattedNumber}`);
+    const result = await whatsapp.sendMessage(companySlug, number, message);
+    console.log(`✅ Mensagem enviada pela empresa ${companySlug}`);
     res.status(200).json({
       ...result,
-      originalNumber: number,
-      formattedNumber: formattedNumber
+      originalNumber: number
     });
   } catch (err) {
     console.error(`❌ Erro ao enviar mensagem pela empresa ${companySlug}:`, err.message);

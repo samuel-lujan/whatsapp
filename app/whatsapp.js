@@ -346,11 +346,72 @@ async function sendMessage(companySlug, number, message) {
   }
 
   try {
-    // Formatar número para o formato do WhatsApp
-    const chatId = number.includes('@c.us') ? number : `${number.replace(/\D/g, '')}@c.us`;
+    // Remove máscaras e formata para WhatsApp
+    let cleanNumber = number.replace(/\D/g, ''); // Remove tudo que não é dígito
+    console.log(`🔢 Número após limpeza: ${cleanNumber} (${cleanNumber.length} dígitos)`);
+    
+    // Adiciona 55 APENAS se não começar com 55
+    if (!cleanNumber.startsWith('55')) {
+      cleanNumber = '55' + cleanNumber;
+      console.log(`➕ Adicionado código 55: ${cleanNumber}`);
+    } else {
+      console.log(`✅ Número já tem código 55: ${cleanNumber}`);
+    }
+    
+    // Formata para o padrão do WhatsApp
+    let chatId = cleanNumber + '@c.us';
+    console.log(`📱 ChatId final: ${chatId}`);
     
     const client = sessions[companySlug].client;
-    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`);
+    console.log(`🔍 Procurando chat para ${chatId}`);
+    
+    // Procura o chat primeiro
+    let chat = null;
+    try {
+      chat = await client.getChatById(chatId);
+      console.log(`📱 Chat encontrado - Nome do usuário: ${chat.name || 'undefined/null'}`);
+    } catch (e) {
+      console.log(`⚠️ Chat não encontrado para ${chatId}`);
+    }
+    // Se o chat não foi encontrado ou o nome do usuário é null/undefined, tenta remover o primeiro 9
+    if (!chat || chat.name === null || chat.name === undefined || chat.name === '') {
+      console.log(`🔄 Chat não encontrado ou usuário sem nome válido no WhatsApp, tentando remover o primeiro 9...`);
+      
+      // Se o número tem pelo menos 13 dígitos e tem 9 na posição correta (após DDD)
+      if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === '9') {
+        const alternativeNumber = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
+        const alternativeChatId = alternativeNumber + '@c.us';
+        console.log(`🔄 Tentando número alternativo (sem primeiro 9): ${alternativeChatId}`);
+        
+        try {
+          const alternativeChat = await client.getChatById(alternativeChatId);
+          console.log(`📱 Chat alternativo encontrado, verificando nome: ${alternativeChat.name || 'undefined'}`);
+          
+          // Verifica se o chat alternativo tem nome de usuário válido
+          if (alternativeChat && alternativeChat.name !== null && alternativeChat.name !== undefined && alternativeChat.name !== '') {
+            console.log(`✅ Chat alternativo com nome de usuário válido: ${alternativeChat.name}`);
+            chat = alternativeChat;
+            chatId = alternativeChatId;
+          } else {
+            console.log(`❌ Chat alternativo também sem nome de usuário válido (undefined/null/vazio)`);
+          }
+        } catch (e) {
+          console.log(`❌ Chat alternativo também não encontrado: ${alternativeChatId}`);
+        }
+      } else {
+        console.log(`❌ Número não tem formato esperado para remoção do 9 (${cleanNumber.length} dígitos)`);
+      }
+    }
+    
+    // Se ainda não encontrou um chat com nome de usuário válido, retorna erro 400
+    if (!chat || chat.name === null || chat.name === undefined || chat.name === '') {
+      console.log(`❌ Nenhum usuário válido encontrado no WhatsApp para ${number}`);
+      const error = new Error('Número não válido - usuário não encontrado no WhatsApp');
+      error.statusCode = 400;
+      throw error;
+    }
+    
+    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId} - Usuário: ${chat.name}`);
     
     // Envia com timeout para evitar travamento
     await Promise.race([
@@ -360,14 +421,15 @@ async function sendMessage(companySlug, number, message) {
       )
     ]);
     
-    console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`);
+    console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para o usuário: ${chat.name}`);
     
     return {
       success: true,
       message: 'Mensagem enviada com sucesso',
       data: {
         companySlug,
-        number,
+        number: chatId,
+        chatName: chat.name,
         content: message,
         timestamp: new Date().toISOString()
       }
@@ -375,6 +437,11 @@ async function sendMessage(companySlug, number, message) {
     
   } catch (error) {
     console.error(`❌ Erro ao enviar mensagem pelo cliente ${companySlug}:`, error.message);
+    
+    // Se é erro 400 (número não válido), não marca como desconectado
+    if (error.statusCode === 400) {
+      throw error;
+    }
     
     // Se houve erro, marca como não conectado
     if (sessions[companySlug]) {
