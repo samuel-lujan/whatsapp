@@ -286,18 +286,112 @@ app.get("/health/:companySlug", authenticateToken, async (req, res) => {
   }
 });
 
-// Rota para forçar limpeza de sessão (para debug)
-app.delete("/clear/:companySlug", authenticateToken, (req, res) => {
+// Rota para buscar informações de um número específico (para debug)
+app.get("/search-number/:companySlug/:number", authenticateToken, async (req, res) => {
+  const { companySlug, number } = req.params;
+  try {
+    console.log(`🔍 Buscando informações do número ${number} para empresa ${companySlug}`);
+    const numberInfo = await whatsapp.searchNumberInfo(companySlug, number);
+    res.json({
+      companySlug,
+      number,
+      info: numberInfo,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error(`❌ Erro ao buscar informações do número ${number}:`, error.message);
+    res.status(500).json({ 
+      error: error.message,
+      companySlug,
+      number,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Rota para forçar limpeza de sessão com logout completo
+app.delete("/clear/:companySlug", authenticateToken, async (req, res) => {
   const { companySlug } = req.params;
   try {
+    console.log(`🧹 Solicitação de limpeza da sessão: ${companySlug}`);
+    
     if (whatsapp.clearSession) {
-      whatsapp.clearSession(companySlug);
-      res.json({ message: `Sessão ${companySlug} limpa com sucesso` });
+      const result = await whatsapp.clearSession(companySlug);
+      
+      if (result.success) {
+        console.log(`✅ Sessão ${companySlug} limpa:`, result.message);
+        res.json({
+          success: true,
+          message: result.message,
+          companySlug,
+          details: result.details,
+          whatsappLoggedOut: result.whatsappLoggedOut,
+          timestamp: new Date().toISOString(),
+          recommendation: result.whatsappLoggedOut 
+            ? "Sessão limpa e WhatsApp desconectado com sucesso" 
+            : "Sessão limpa, mas verifique se o WhatsApp foi desconectado no celular"
+        });
+      } else {
+        console.log(`⚠️ Falha ao limpar sessão ${companySlug}:`, result.message);
+        res.status(404).json({
+          success: false,
+          message: result.message,
+          companySlug,
+          timestamp: new Date().toISOString()
+        });
+      }
     } else {
-      res.json({ message: "Função clearSession não disponível" });
+      res.status(500).json({ 
+        error: "Função clearSession não disponível",
+        companySlug,
+        timestamp: new Date().toISOString()
+      });
     }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(`❌ Erro ao limpar sessão ${companySlug}:`, error.message);
+    rollbar.error(error, { companySlug, route: '/clear/:companySlug' });
+    res.status(500).json({ 
+      error: error.message,
+      companySlug,
+      timestamp: new Date().toISOString(),
+      suggestion: "Tente novamente ou verifique se a sessão existe"
+    });
+  }
+});
+
+// Rota para limpar TODAS as sessões ativas
+app.delete("/clear-all", authenticateToken, async (req, res) => {
+  try {
+    console.log(`🧹 Solicitação de limpeza de TODAS as sessões`);
+    
+    if (whatsapp.clearAllSessions) {
+      const result = await whatsapp.clearAllSessions();
+      
+      console.log(`✅ Limpeza em massa concluída:`, result.summary);
+      res.json({
+        success: true,
+        message: result.message,
+        summary: result.summary,
+        details: result.sessions,
+        timestamp: new Date().toISOString(),
+        recommendation: result.summary.withLogout > 0 
+          ? `${result.summary.withLogout} sessões desconectadas do WhatsApp com sucesso` 
+          : "Verifique manualmente se as sessões foram desconectadas no WhatsApp"
+      });
+    } else {
+      res.status(500).json({ 
+        error: "Função clearAllSessions não disponível",
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error(`❌ Erro ao limpar todas as sessões:`, error.message);
+    rollbar.error(error, { route: '/clear-all' });
+    res.status(500).json({ 
+      error: error.message,
+      timestamp: new Date().toISOString(),
+      suggestion: "Tente limpar as sessões individualmente"
+    });
   }
 });
 
@@ -308,8 +402,10 @@ app.listen(PORT, () => {
   console.log(`POST /send-message/:companySlug - Enviar mensagem`);
   console.log(`GET  /companies - Listar empresas conectadas`);
   console.log(`GET  /debug/:companySlug - Debug de sessão específica`);
-  console.log(`GET  /health/:companySlug - Verificar saúde do cliente (NEW!)`);
-  console.log(`DELETE /clear/:companySlug - Limpar sessão específica`);
+  console.log(`GET  /health/:companySlug - Verificar saúde do cliente`);
+  console.log(`GET  /search-number/:companySlug/:number - Buscar info de número (NEW!)`);
+  console.log(`DELETE /clear/:companySlug - Limpar sessão e desconectar WhatsApp`);
+  console.log(`DELETE /clear-all - Limpar TODAS as sessões e desconectar (NEW!)`);
   console.log(`\n🔧 Melhorias implementadas:`);
   console.log(`   ✅ Detecção inteligente de sessões já conectadas`);
   console.log(`   ✅ Verificação robusta do estado real da conexão`);
@@ -317,6 +413,8 @@ app.listen(PORT, () => {
   console.log(`   ✅ Correção automática de estados inconsistentes`);
   console.log(`   ✅ Tratamento específico de erros de conexão perdida`);
   console.log(`   ✅ Debug avançado e monitoramento de saúde`);
+  console.log(`   ✅ Busca inteligente de chat correto (resolve conversa vs número) (NEW!)`);
+  console.log(`   ✅ Limpeza completa com logout do WhatsApp no celular (NEW!)`);
   console.log(`\nPressione Ctrl+C para parar o servidor`);
 });
 
