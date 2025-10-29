@@ -322,6 +322,82 @@ async function verifyClientHealth(companySlug) {
   }
 }
 
+// Função para encontrar o chat correto para um número
+async function findCorrectChatId(client, number) {
+  const cleanNumber = number.replace(/\D/g, '');
+  const possibleChatIds = [
+    `${cleanNumber}@c.us`,
+    `${cleanNumber}@s.whatsapp.net`
+  ];
+  
+  console.log(`🔍 Procurando chat existente para número: ${cleanNumber}`);
+  
+  try {
+    // PRIMEIRA TENTATIVA: Buscar por chats existentes
+    const chats = await client.getChats();
+    
+    for (const chat of chats) {
+      const chatNumber = chat.id.user;
+      if (chatNumber === cleanNumber) {
+        console.log(`✅ Encontrou chat existente: ${chat.id._serialized} (nome: ${chat.name})`);
+        return {
+          chatId: chat.id._serialized,
+          isExistingChat: true,
+          chatName: chat.name,
+          isGroup: chat.isGroup
+        };
+      }
+    }
+    
+    // SEGUNDA TENTATIVA: Verificar se é um contato salvo
+    console.log(`🔍 Não encontrou chat existente, verificando contatos salvos...`);
+    const contacts = await client.getContacts();
+    
+    for (const contact of contacts) {
+      const contactNumber = contact.id.user;
+      if (contactNumber === cleanNumber) {
+        console.log(`✅ Encontrou contato salvo: ${contact.id._serialized} (nome: ${contact.name || contact.pushname})`);
+        return {
+          chatId: contact.id._serialized,
+          isExistingChat: false,
+          contactName: contact.name || contact.pushname,
+          isContact: true
+        };
+      }
+    }
+    
+    // TERCEIRA TENTATIVA: Verificar se o número está registrado no WhatsApp
+    console.log(`🔍 Verificando se número ${cleanNumber} está registrado no WhatsApp...`);
+    const isRegistered = await client.isRegisteredUser(`${cleanNumber}@c.us`);
+    
+    if (isRegistered) {
+      console.log(`✅ Número ${cleanNumber} está registrado, usando formato padrão`);
+      return {
+        chatId: `${cleanNumber}@c.us`,
+        isExistingChat: false,
+        isRegistered: true
+      };
+    } else {
+      console.log(`⚠️ Número ${cleanNumber} não está registrado no WhatsApp`);
+      // Mesmo assim tenta enviar, pode ser que funcione
+      return {
+        chatId: `${cleanNumber}@c.us`,
+        isExistingChat: false,
+        isRegistered: false,
+        warning: 'Número pode não estar registrado no WhatsApp'
+      };
+    }
+    
+  } catch (error) {
+    console.log(`⚠️ Erro ao buscar chat/contato, usando formato padrão:`, error.message);
+    return {
+      chatId: `${cleanNumber}@c.us`,
+      isExistingChat: false,
+      error: error.message
+    };
+  }
+}
+
 // Função para enviar mensagem com verificação robusta
 async function sendMessage(companySlug, number, message) {
   if (!sessions[companySlug] || !sessions[companySlug].ready) {
@@ -346,30 +422,51 @@ async function sendMessage(companySlug, number, message) {
   }
 
   try {
-    // Formatar número para o formato do WhatsApp
-    const chatId = number.includes('@c.us') ? number : `${number.replace(/\D/g, '')}@c.us`;
-    
     const client = sessions[companySlug].client;
-    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`);
+    
+    // NOVA LÓGICA: Encontra o chat correto para o número
+    console.log(`🔍 Procurando chat correto para número: ${number}`);
+    const chatInfo = await findCorrectChatId(client, number);
+    
+    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatInfo.chatId}`);
+    console.log(`📋 Info do chat:`, {
+      isExistingChat: chatInfo.isExistingChat,
+      chatName: chatInfo.chatName,
+      contactName: chatInfo.contactName,
+      isGroup: chatInfo.isGroup,
+      isRegistered: chatInfo.isRegistered,
+      warning: chatInfo.warning
+    });
     
     // Envia com timeout para evitar travamento
-    await Promise.race([
-      client.sendMessage(chatId, message),
+    const result = await Promise.race([
+      client.sendMessage(chatInfo.chatId, message),
       new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Timeout ao enviar mensagem - cliente pode ter desconectado')), 15000)
       )
     ]);
     
     console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`);
+    console.log(`📊 ID da mensagem: ${result.id._serialized}`);
     
     return {
       success: true,
       message: 'Mensagem enviada com sucesso',
       data: {
         companySlug,
-        number,
+        originalNumber: number,
+        finalChatId: chatInfo.chatId,
+        messageId: result.id._serialized,
+        chatInfo: {
+          isExistingChat: chatInfo.isExistingChat,
+          chatName: chatInfo.chatName,
+          contactName: chatInfo.contactName,
+          isGroup: chatInfo.isGroup,
+          isRegistered: chatInfo.isRegistered
+        },
         content: message,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        warning: chatInfo.warning
       }
     };
     
@@ -399,19 +496,71 @@ function getClient(companySlug) {
   return null;
 }
 
-// Função para forçar limpeza de uma sessão (para debug)
-function clearSession(companySlug) {
-  if (sessions[companySlug]) {
-    try {
-      sessions[companySlug].client.destroy();
-    } catch (e) {
-      console.log(`Erro ao destruir cliente ${companySlug}:`, e.message);
-    }
-    delete sessions[companySlug];
-    console.log(`🗑️ Sessão ${companySlug} foi limpa manualmente`);
-    return true;
+// Função para forçar limpeza de uma sessão com logout completo
+async function clearSession(companySlug) {
+  if (!sessions[companySlug]) {
+    console.log(`⚠️ Sessão ${companySlug} não existe`);
+    return { success: false, message: 'Sessão não existe' };
   }
-  return false;
+
+  const client = sessions[companySlug].client;
+  let logoutSuccess = false;
+  let destroySuccess = false;
+  
+  console.log(`🧹 Iniciando limpeza completa da sessão ${companySlug}...`);
+
+  // PRIMEIRO: Tenta fazer logout do WhatsApp (desconecta do celular)
+  if (client) {
+    try {
+      console.log(`📱 Fazendo logout do WhatsApp para ${companySlug}...`);
+      await Promise.race([
+        client.logout(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout no logout')), 10000)
+        )
+      ]);
+      logoutSuccess = true;
+      console.log(`✅ Logout realizado com sucesso para ${companySlug}`);
+    } catch (e) {
+      console.log(`⚠️ Erro no logout para ${companySlug}:`, e.message);
+      // Continua mesmo se logout falhar
+    }
+
+    // SEGUNDO: Destroi o cliente (limpa sessão local)
+    try {
+      console.log(`🗑️ Destruindo cliente ${companySlug}...`);
+      await client.destroy();
+      destroySuccess = true;
+      console.log(`✅ Cliente ${companySlug} destruído com sucesso`);
+    } catch (e) {
+      console.log(`⚠️ Erro ao destruir cliente ${companySlug}:`, e.message);
+      // Continua mesmo se destroy falhar
+    }
+  }
+
+  // TERCEIRO: Remove da lista de sessões
+  delete sessions[companySlug];
+  console.log(`🗑️ Sessão ${companySlug} removida da lista`);
+
+  const result = {
+    success: true,
+    message: `Sessão ${companySlug} foi limpa`,
+    details: {
+      logoutSuccess,
+      destroySuccess,
+      sessionRemoved: true
+    }
+  };
+
+  if (logoutSuccess) {
+    result.message += ' e logout realizado no WhatsApp';
+    result.whatsappLoggedOut = true;
+  } else {
+    result.message += ' (logout do WhatsApp pode ter falhado)';
+    result.whatsappLoggedOut = false;
+  }
+
+  return result;
 }
 
 // Função para debug - força verificação do estado real
@@ -455,6 +604,75 @@ async function debugSessionState(companySlug) {
   return debug;
 }
 
+// Função para buscar informações de um número específico (para debug)
+async function searchNumberInfo(companySlug, number) {
+  if (!sessions[companySlug] || !sessions[companySlug].ready) {
+    throw new Error(`Empresa ${companySlug} não está conectada ao WhatsApp`);
+  }
+
+  const client = sessions[companySlug].client;
+  const cleanNumber = number.replace(/\D/g, '');
+  
+  console.log(`🔍 Buscando informações completas para número: ${cleanNumber}`);
+  
+  const info = {
+    originalNumber: number,
+    cleanNumber: cleanNumber,
+    searchResults: {
+      chats: [],
+      contacts: [],
+      registrationStatus: null
+    }
+  };
+
+  try {
+    // Busca por chats
+    const chats = await client.getChats();
+    for (const chat of chats) {
+      if (chat.id.user === cleanNumber) {
+        info.searchResults.chats.push({
+          id: chat.id._serialized,
+          name: chat.name,
+          isGroup: chat.isGroup,
+          isReadOnly: chat.isReadOnly,
+          unreadCount: chat.unreadCount,
+          timestamp: chat.timestamp
+        });
+      }
+    }
+
+    // Busca por contatos
+    const contacts = await client.getContacts();
+    for (const contact of contacts) {
+      if (contact.id.user === cleanNumber) {
+        info.searchResults.contacts.push({
+          id: contact.id._serialized,
+          name: contact.name,
+          pushname: contact.pushname,
+          isMyContact: contact.isMyContact,
+          isUser: contact.isUser,
+          isWAContact: contact.isWAContact
+        });
+      }
+    }
+
+    // Verifica se está registrado
+    try {
+      info.searchResults.registrationStatus = await client.isRegisteredUser(`${cleanNumber}@c.us`);
+    } catch (e) {
+      info.searchResults.registrationStatus = `Erro: ${e.message}`;
+    }
+
+    // Usa a função de busca de chat correto
+    const chatInfo = await findCorrectChatId(client, number);
+    info.recommendedChatId = chatInfo;
+
+    return info;
+  } catch (error) {
+    throw new Error(`Erro ao buscar informações: ${error.message}`);
+  }
+}
+
 // Função para listar todas as sessões (para debug)
 function listSessions() {
   const sessionList = {};
@@ -469,6 +687,51 @@ function listSessions() {
   return sessionList;
 }
 
+// Função para fazer logout de todas as sessões ativas
+async function clearAllSessions() {
+  const results = {};
+  const sessionKeys = Object.keys(sessions);
+  
+  console.log(`🧹 Iniciando limpeza de todas as sessões (${sessionKeys.length} sessões)`);
+  
+  if (sessionKeys.length === 0) {
+    return { success: true, message: 'Nenhuma sessão ativa para limpar', sessions: {} };
+  }
+  
+  // Processa todas as sessões em paralelo
+  const promises = sessionKeys.map(async (companySlug) => {
+    try {
+      const result = await clearSession(companySlug);
+      results[companySlug] = result;
+    } catch (error) {
+      results[companySlug] = {
+        success: false,
+        message: `Erro ao limpar sessão: ${error.message}`,
+        error: error.message
+      };
+    }
+  });
+  
+  await Promise.all(promises);
+  
+  const successCount = Object.values(results).filter(r => r.success).length;
+  const logoutCount = Object.values(results).filter(r => r.whatsappLoggedOut).length;
+  
+  console.log(`✅ Limpeza concluída: ${successCount}/${sessionKeys.length} sessões limpas, ${logoutCount} com logout do WhatsApp`);
+  
+  return {
+    success: true,
+    message: `Processadas ${sessionKeys.length} sessões`,
+    summary: {
+      total: sessionKeys.length,
+      successful: successCount,
+      withLogout: logoutCount,
+      failed: sessionKeys.length - successCount
+    },
+    sessions: results
+  };
+}
+
 module.exports = { 
   getStatus, 
   checkConnectionStatus,
@@ -478,5 +741,7 @@ module.exports = {
   sendMessage, 
   getClient,
   clearSession,
-  listSessions
+  clearAllSessions,
+  listSessions,
+  searchNumberInfo
 };
