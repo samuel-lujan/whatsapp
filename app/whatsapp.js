@@ -508,12 +508,7 @@ async function sendMessage(companySlug, number, message) {
         // Envia APENAS para o número alternativo (sem 9)
         console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${alternativeChatId} (versão sem 9)`);
         
-        await Promise.race([
-          client.sendMessage(alternativeChatId, message),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout ao enviar mensagem')), 30000)
-          )
-        ]);
+        await client.sendMessage(alternativeChatId, message);
         
         console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para versão sem 9: ${alternativeChatId}`);
         
@@ -540,13 +535,7 @@ async function sendMessage(companySlug, number, message) {
     // ENVIO NORMAL: Se encontrou usuário válido, envia normalmente
     console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId} - Usuário: ${contact.pushname}`);
     
-    // Envia com timeout para evitar travamento (caso normal com chat encontrado)
-    await Promise.race([
-      client.sendMessage(chatId, message),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout ao enviar mensagem - cliente pode ter desconectado')), 30000)
-      )
-    ]);
+    await client.sendMessage(chatId, message);
     
     console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para: ${contact.pushname}`);
     
@@ -559,8 +548,7 @@ async function sendMessage(companySlug, number, message) {
         chatName: chat.name,
         userPushname: contact.pushname,
         content: message,
-        timestamp: new Date().toISOString(),
-        warning: chatInfo.warning
+        timestamp: new Date().toISOString()
       }
     };
     
