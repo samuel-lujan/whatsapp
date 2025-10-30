@@ -365,129 +365,110 @@ async function sendMessage(companySlug, number, message) {
     const client = sessions[companySlug].client;
     console.log(`🔍 Procurando chat para ${chatId}`);
     
-    // Procura o chat primeiro com timeout de 10 segundos
+    // PRIMEIRA VERIFICAÇÃO: Procura o chat original - sem timeout, leva o tempo que for
     let chat = null;
     let contact = null;
+    let isValidWhatsAppUser = false;
+    
+    console.log(`🔍 Verificando se ${chatId} é um usuário válido do WhatsApp...`);
     try {
-      chat = await Promise.race([
-        client.getChatById(chatId),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-10s')), 10000))
-      ]);
-      // Busca informações do contato para verificar o pushname
+      chat = await client.getChatById(chatId);
       contact = await chat.getContact();
-      console.log(`📱 Chat encontrado - Pushname: ${contact.pushname || 'undefined/null'}`);
-    } catch (e) {
-      if (e.message === 'timeout-10s') {
-        console.log(`⏰ Timeout de 10s ao procurar chat ${chatId} - continuando sem verificação`);
+      
+      // Verifica se é realmente um usuário válido do WhatsApp
+      if (contact && contact.pushname !== null && contact.pushname !== undefined && contact.pushname !== '') {
+        console.log(`✅ Usuário válido encontrado - Pushname: ${contact.pushname}`);
+        isValidWhatsAppUser = true;
       } else {
-        console.log(`⚠️ Chat não encontrado para ${chatId}`);
+        console.log(`⚠️ Chat encontrado mas pushname inválido: ${contact?.pushname || 'undefined/null'}`);
+        isValidWhatsAppUser = false;
       }
+    } catch (e) {
+      console.log(`❌ Não é um usuário válido do WhatsApp: ${chatId} - ${e.message}`);
+      isValidWhatsAppUser = false;
     }
-    // Se o chat não foi encontrado ou o pushname do usuário é null/undefined, tenta remover o primeiro 9
-    if (!chat || !contact || contact.pushname === null || contact.pushname === undefined || contact.pushname === '') {
-      console.log(`🔄 Chat não encontrado ou usuário sem pushname válido no WhatsApp, tentando remover o primeiro 9...`);
+    // SEGUNDA VERIFICAÇÃO: Se não é usuário válido, tenta remover o 9 (APENAS quando necessário)
+    if (!isValidWhatsAppUser) {
+      console.log(`🔄 Número original não é usuário válido do WhatsApp, tentando versão sem o 9...`);
       
       // Se o número tem pelo menos 13 dígitos e tem 9 na posição correta (após DDD)
       if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === '9') {
         const alternativeNumber = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
         const alternativeChatId = alternativeNumber + '@c.us';
-        console.log(`🔄 Tentando número alternativo (sem primeiro 9): ${alternativeChatId}`);
+        console.log(`� Verificando se ${alternativeChatId} é um usuário válido do WhatsApp...`);
         
         try {
-          const alternativeChat = await Promise.race([
-            client.getChatById(alternativeChatId),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-10s')), 10000))
-          ]);
+          const alternativeChat = await client.getChatById(alternativeChatId);
           const alternativeContact = await alternativeChat.getContact();
-          console.log(`📱 Chat alternativo encontrado, verificando pushname: ${alternativeContact.pushname || 'undefined'}`);
           
-          // Verifica se o chat alternativo tem pushname válido
+          // Verifica se o número alternativo é um usuário válido
           if (alternativeChat && alternativeContact && alternativeContact.pushname !== null && alternativeContact.pushname !== undefined && alternativeContact.pushname !== '') {
-            console.log(`✅ Chat alternativo com pushname válido: ${alternativeContact.pushname}`);
+            console.log(`✅ Usuário válido encontrado na versão alternativa - Pushname: ${alternativeContact.pushname}`);
             chat = alternativeChat;
             contact = alternativeContact;
             chatId = alternativeChatId;
+            isValidWhatsAppUser = true;
           } else {
-            console.log(`❌ Chat alternativo também sem pushname válido (undefined/null/vazio)`);
+            console.log(`❌ Versão alternativa também não é usuário válido: pushname ${alternativeContact?.pushname || 'undefined/null'}`);
           }
         } catch (e) {
-          if (e.message === 'timeout-10s') {
-            console.log(`⏰ Timeout de 10s ao procurar chat alternativo ${alternativeChatId} - continuando sem verificação`);
-          } else {
-            console.log(`❌ Chat alternativo também não encontrado: ${alternativeChatId}`);
-          }
+          console.log(`❌ Versão alternativa também não é usuário válido do WhatsApp: ${alternativeChatId} - ${e.message}`);
         }
       } else {
         console.log(`❌ Número não tem formato esperado para remoção do 9 (${cleanNumber.length} dígitos)`);
       }
     }
     
-    // Se ainda não encontrou um chat com pushname válido após 10 segundos, envia para ambos os números
-    if (!chat || !contact || contact.pushname === null || contact.pushname === undefined || contact.pushname === '') {
-      console.log(`⚠️ Nenhum usuário com pushname válido encontrado no WhatsApp para ${number} - enviando para ambos os números após timeout`);
+    // Se ainda não encontrou um usuário com pushname válido, envia APENAS para a versão sem 9
+    if (!isValidWhatsAppUser) {
+      console.log(`⚠️ Nenhum usuário com pushname válido encontrado no WhatsApp para ${number}`);
       
-      // Prepara os dois números para envio
-      const numbersToSend = [chatId]; // Número original
-      
-      // Se o número tem 9 na posição correta, adiciona a versão sem 9
+      // Se o número tem 9 na posição correta, envia APENAS para a versão sem 9
       if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === '9') {
         const alternativeNumber = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
         const alternativeChatId = alternativeNumber + '@c.us';
-        numbersToSend.push(alternativeChatId);
-        console.log(`📱 Enviando para: ${chatId} e ${alternativeChatId}`);
-      } else {
-        console.log(`📱 Enviando apenas para: ${chatId}`);
-      }
-      
-      // Envia para todos os números com tentativas paralelas
-      const sendPromises = numbersToSend.map(async (currentChatId) => {
-        try {
-          await Promise.race([
-            client.sendMessage(currentChatId, message),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout ao enviar mensagem')), 15000)
-            )
-          ]);
-          console.log(`✅ Mensagem enviada com sucesso para: ${currentChatId}`);
-          return { success: true, chatId: currentChatId };
-        } catch (error) {
-          console.log(`❌ Falha ao enviar para ${currentChatId}: ${error.message}`);
-          return { success: false, chatId: currentChatId, error: error.message };
-        }
-      });
-      
-      // Aguarda todas as tentativas
-      const results = await Promise.all(sendPromises);
-      const successResults = results.filter(r => r.success);
-      
-      if (successResults.length > 0) {
-        console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para ${successResults.length} número(s)`);
+        console.log(`📱 Enviando APENAS para versão sem 9: ${alternativeChatId}`);
+        
+        // Envia APENAS para o número alternativo (sem 9)
+        console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${alternativeChatId} (versão sem 9)`);
+        
+        await Promise.race([
+          client.sendMessage(alternativeChatId, message),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout ao enviar mensagem')), 30000)
+          )
+        ]);
+        
+        console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para versão sem 9: ${alternativeChatId}`);
+        
         return {
           success: true,
-          message: `Mensagem enviada com sucesso para ${successResults.length} número(s)`,
+          message: 'Mensagem enviada com sucesso para versão sem 9',
           data: {
             companySlug,
-            numbers: successResults.map(r => r.chatId),
+            number: alternativeChatId,
             originalNumber: number,
-            chatName: chatId,
-            userPushname: 'Usuário sem nome (timeout)',
+            chatName: alternativeChatId,
+            userPushname: 'Usuário sem pushname válido',
             content: message,
             timestamp: new Date().toISOString(),
-            sentToMultiple: successResults.length > 1
+            sentToAlternative: true
           }
         };
       } else {
-        throw new Error('Falha ao enviar mensagem para todos os números tentados');
+        console.log(`❌ Número não tem formato esperado para remoção do 9, não enviando mensagem`);
+        throw new Error(`Número ${number} não é um usuário válido do WhatsApp e não tem formato para tentativa alternativa`);
       }
     }
     
+    // ENVIO NORMAL: Se encontrou usuário válido, envia normalmente
     console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId} - Usuário: ${contact.pushname}`);
     
     // Envia com timeout para evitar travamento (caso normal com chat encontrado)
     await Promise.race([
       client.sendMessage(chatId, message),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout ao enviar mensagem - cliente pode ter desconectado')), 15000)
+        setTimeout(() => reject(new Error('Timeout ao enviar mensagem - cliente pode ter desconectado')), 30000)
       )
     ]);
     
