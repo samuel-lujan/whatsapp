@@ -365,17 +365,27 @@ async function sendMessage(companySlug, number, message) {
     const client = sessions[companySlug].client;
     console.log(`🔍 Procurando chat para ${chatId}`);
     
-    // Procura o chat primeiro
+    // Procura o chat primeiro com timeout de 10 segundos
     let chat = null;
+    let contact = null;
     try {
-      chat = await client.getChatById(chatId);
-      console.log(`📱 Chat encontrado - Nome do usuário: ${chat.name || 'undefined/null'}`);
+      chat = await Promise.race([
+        client.getChatById(chatId),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-10s')), 10000))
+      ]);
+      // Busca informações do contato para verificar o pushname
+      contact = await chat.getContact();
+      console.log(`📱 Chat encontrado - Pushname: ${contact.pushname || 'undefined/null'}`);
     } catch (e) {
-      console.log(`⚠️ Chat não encontrado para ${chatId}`);
+      if (e.message === 'timeout-10s') {
+        console.log(`⏰ Timeout de 10s ao procurar chat ${chatId} - continuando sem verificação`);
+      } else {
+        console.log(`⚠️ Chat não encontrado para ${chatId}`);
+      }
     }
-    // Se o chat não foi encontrado ou o nome do usuário é null/undefined, tenta remover o primeiro 9
-    if (!chat || chat.name === null || chat.name === undefined || chat.name === '') {
-      console.log(`🔄 Chat não encontrado ou usuário sem nome válido no WhatsApp, tentando remover o primeiro 9...`);
+    // Se o chat não foi encontrado ou o pushname do usuário é null/undefined, tenta remover o primeiro 9
+    if (!chat || !contact || contact.pushname === null || contact.pushname === undefined || contact.pushname === '') {
+      console.log(`🔄 Chat não encontrado ou usuário sem pushname válido no WhatsApp, tentando remover o primeiro 9...`);
       
       // Se o número tem pelo menos 13 dígitos e tem 9 na posição correta (após DDD)
       if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === '9') {
@@ -384,36 +394,96 @@ async function sendMessage(companySlug, number, message) {
         console.log(`🔄 Tentando número alternativo (sem primeiro 9): ${alternativeChatId}`);
         
         try {
-          const alternativeChat = await client.getChatById(alternativeChatId);
-          console.log(`📱 Chat alternativo encontrado, verificando nome: ${alternativeChat.name || 'undefined'}`);
+          const alternativeChat = await Promise.race([
+            client.getChatById(alternativeChatId),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-10s')), 10000))
+          ]);
+          const alternativeContact = await alternativeChat.getContact();
+          console.log(`📱 Chat alternativo encontrado, verificando pushname: ${alternativeContact.pushname || 'undefined'}`);
           
-          // Verifica se o chat alternativo tem nome de usuário válido
-          if (alternativeChat && alternativeChat.name !== null && alternativeChat.name !== undefined && alternativeChat.name !== '') {
-            console.log(`✅ Chat alternativo com nome de usuário válido: ${alternativeChat.name}`);
+          // Verifica se o chat alternativo tem pushname válido
+          if (alternativeChat && alternativeContact && alternativeContact.pushname !== null && alternativeContact.pushname !== undefined && alternativeContact.pushname !== '') {
+            console.log(`✅ Chat alternativo com pushname válido: ${alternativeContact.pushname}`);
             chat = alternativeChat;
+            contact = alternativeContact;
             chatId = alternativeChatId;
           } else {
-            console.log(`❌ Chat alternativo também sem nome de usuário válido (undefined/null/vazio)`);
+            console.log(`❌ Chat alternativo também sem pushname válido (undefined/null/vazio)`);
           }
         } catch (e) {
-          console.log(`❌ Chat alternativo também não encontrado: ${alternativeChatId}`);
+          if (e.message === 'timeout-10s') {
+            console.log(`⏰ Timeout de 10s ao procurar chat alternativo ${alternativeChatId} - continuando sem verificação`);
+          } else {
+            console.log(`❌ Chat alternativo também não encontrado: ${alternativeChatId}`);
+          }
         }
       } else {
         console.log(`❌ Número não tem formato esperado para remoção do 9 (${cleanNumber.length} dígitos)`);
       }
     }
     
-    // Se ainda não encontrou um chat com nome de usuário válido, retorna erro 400
-    if (!chat || chat.name === null || chat.name === undefined || chat.name === '') {
-      console.log(`❌ Nenhum usuário válido encontrado no WhatsApp para ${number}`);
-      const error = new Error('Número não válido - usuário não encontrado no WhatsApp');
-      error.statusCode = 400;
-      throw error;
+    // Se ainda não encontrou um chat com pushname válido após 10 segundos, envia para ambos os números
+    if (!chat || !contact || contact.pushname === null || contact.pushname === undefined || contact.pushname === '') {
+      console.log(`⚠️ Nenhum usuário com pushname válido encontrado no WhatsApp para ${number} - enviando para ambos os números após timeout`);
+      
+      // Prepara os dois números para envio
+      const numbersToSend = [chatId]; // Número original
+      
+      // Se o número tem 9 na posição correta, adiciona a versão sem 9
+      if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === '9') {
+        const alternativeNumber = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
+        const alternativeChatId = alternativeNumber + '@c.us';
+        numbersToSend.push(alternativeChatId);
+        console.log(`📱 Enviando para: ${chatId} e ${alternativeChatId}`);
+      } else {
+        console.log(`📱 Enviando apenas para: ${chatId}`);
+      }
+      
+      // Envia para todos os números com tentativas paralelas
+      const sendPromises = numbersToSend.map(async (currentChatId) => {
+        try {
+          await Promise.race([
+            client.sendMessage(currentChatId, message),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout ao enviar mensagem')), 15000)
+            )
+          ]);
+          console.log(`✅ Mensagem enviada com sucesso para: ${currentChatId}`);
+          return { success: true, chatId: currentChatId };
+        } catch (error) {
+          console.log(`❌ Falha ao enviar para ${currentChatId}: ${error.message}`);
+          return { success: false, chatId: currentChatId, error: error.message };
+        }
+      });
+      
+      // Aguarda todas as tentativas
+      const results = await Promise.all(sendPromises);
+      const successResults = results.filter(r => r.success);
+      
+      if (successResults.length > 0) {
+        console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para ${successResults.length} número(s)`);
+        return {
+          success: true,
+          message: `Mensagem enviada com sucesso para ${successResults.length} número(s)`,
+          data: {
+            companySlug,
+            numbers: successResults.map(r => r.chatId),
+            originalNumber: number,
+            chatName: chatId,
+            userPushname: 'Usuário sem nome (timeout)',
+            content: message,
+            timestamp: new Date().toISOString(),
+            sentToMultiple: successResults.length > 1
+          }
+        };
+      } else {
+        throw new Error('Falha ao enviar mensagem para todos os números tentados');
+      }
     }
     
-    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId} - Usuário: ${chat.name}`);
+    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId} - Usuário: ${contact.pushname}`);
     
-    // Envia com timeout para evitar travamento
+    // Envia com timeout para evitar travamento (caso normal com chat encontrado)
     await Promise.race([
       client.sendMessage(chatId, message),
       new Promise((_, reject) => 
@@ -421,7 +491,7 @@ async function sendMessage(companySlug, number, message) {
       )
     ]);
     
-    console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para o usuário: ${chat.name}`);
+    console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para: ${contact.pushname}`);
     
     return {
       success: true,
@@ -430,6 +500,7 @@ async function sendMessage(companySlug, number, message) {
         companySlug,
         number: chatId,
         chatName: chat.name,
+        userPushname: contact.pushname,
         content: message,
         timestamp: new Date().toISOString()
       }
