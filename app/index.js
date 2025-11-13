@@ -22,39 +22,6 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || "sua-chave-secreta-aqui";
 
 const app = express();
 
-// Função para limpar e validar número do WhatsApp
-function formatWhatsAppNumber(number) {
-  // Remove todos os caracteres que não são números (incluindo o +)
-  const cleanNumber = number.replace(/\D/g, '');
-  
-  // Se o número já tem 13 dígitos (55 + 11 dígitos), está correto
-  if (cleanNumber.length === 13 && cleanNumber.startsWith('55')) {
-    return '+' + cleanNumber;
-  }
-  
-  // Se tem 11 dígitos, adiciona o código do país (55)
-  if (cleanNumber.length === 11) {
-    return '+55' + cleanNumber;
-  }
-  
-  // Se tem 10 dígitos, adiciona 9 + código do país
-  if (cleanNumber.length === 10) {
-    // Adiciona o 9 no celular (assume que é celular se tem 10 dígitos)
-    const ddd = cleanNumber.substring(0, 2);
-    const numeroSem9 = cleanNumber.substring(2);
-    return '+55' + ddd + '9' + numeroSem9;
-  }
-  
-  // Se tem 12 dígitos sem o código do país (começando com 55), remove o 55 e reprocessa
-  if (cleanNumber.length === 12 && cleanNumber.startsWith('55')) {
-    const numberWithout55 = cleanNumber.substring(2);
-    return formatWhatsAppNumber(numberWithout55);
-  }
-  
-  // Se não se enquadra em nenhum padrão conhecido, retorna erro
-  throw new Error(`Número inválido: ${number}. Formato esperado: +5511999999999, (11) 99999-9999 ou 11999999999`);
-}
-
 // Middleware para parsing JSON
 app.use(express.json());
 
