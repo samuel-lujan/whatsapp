@@ -399,12 +399,46 @@ async function findCorrectChatId(client, number) {
 }
 
 async function validateWhatsAppNumber(client, number) {
-  // Remove todos os caracteres não numéricos
   let cleanNumber = number.replace(/\D/g, '');
   
-  // Adiciona 55 APENAS se não começar com 55
+  console.log(`🔢 Número original limpo: ${cleanNumber} (${cleanNumber.length} dígitos)`);
+  
   if (!cleanNumber.startsWith('55')) {
-    cleanNumber = '55' + cleanNumber;
+    // Se tem 11 dígitos (DDD + número), adiciona 55
+    if (cleanNumber.length === 11) {
+      cleanNumber = '55' + cleanNumber;
+      console.log(`➕ Adicionado código 55 (11 dígitos): ${cleanNumber}`);
+    }
+    // Se tem 10 dígitos (DDD + número sem 9), adiciona 55
+    else if (cleanNumber.length === 10) {
+      cleanNumber = '55' + cleanNumber;
+      console.log(`➕ Adicionado código 55 (10 dígitos): ${cleanNumber}`);
+    }
+    // Se tem menos de 10 dígitos, é inválido
+    else if (cleanNumber.length < 10) {
+      console.log(`⚠️ Número muito curto: ${cleanNumber.length} dígitos`);
+      return {
+        isValid: false,
+        originalNumber: number,
+        numberId: null,
+        error: `Número muito curto: ${cleanNumber.length} dígitos (mínimo 10)`
+      };
+    }
+    // Se tem mais de 11 mas não começa com 55, pode ser erro
+    else {
+      console.log(`⚠️ Número com formato inesperado: ${cleanNumber.length} dígitos sem código 55`);
+    }
+  }
+  
+  // Validação de formato básico
+  if (cleanNumber.length < 12 || cleanNumber.length > 13) {
+    console.log(`⚠️ Número com formato inválido: ${cleanNumber.length} dígitos (esperado 12 ou 13)`);
+    return {
+      isValid: false,
+      originalNumber: number,
+      numberId: null,
+      error: `Número com formato inválido: ${cleanNumber.length} dígitos`
+    };
   }
   
   console.log(`🔍 Validando número: ${cleanNumber}`);
@@ -412,17 +446,19 @@ async function validateWhatsAppNumber(client, number) {
   // Lista de variações para testar
   const variations = [cleanNumber];
   
-  // Se tem 13+ dígitos e o 5º caractere é '9', adiciona versão sem o 9
-  if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === '9') {
+  // Se tem 13 dígitos e o 5º caractere (índice 4) é '9', adiciona versão sem o 9
+  if (cleanNumber.length === 13 && cleanNumber.charAt(4) === '9') {
     const withoutNine = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
     variations.push(withoutNine);
-    console.log(`📋 Testando variações: ${cleanNumber} e ${withoutNine}`);
+    console.log(`📋 Testando variações: [${cleanNumber}, ${withoutNine}]`);
   } 
-  // Se tem 12 dígitos e NÃO tem 9, adiciona versão COM o 9
+  // Se tem 12 dígitos e o 5º caractere NÃO é '9', adiciona versão COM o 9
   else if (cleanNumber.length === 12 && cleanNumber.charAt(4) !== '9') {
     const withNine = cleanNumber.substring(0, 4) + '9' + cleanNumber.substring(4);
     variations.push(withNine);
-    console.log(`📋 Testando variações: ${cleanNumber} e ${withNine}`);
+    console.log(`📋 Testando variações: [${cleanNumber}, ${withNine}]`);
+  } else {
+    console.log(`📋 Testando apenas: [${cleanNumber}]`);
   }
   
   // Testa cada variação usando getNumberId (muito mais rápido e confiável)
@@ -482,6 +518,7 @@ async function sendMessage(companySlug, number, message) {
   try {
     const client = sessions[companySlug].client;
     
+    // VALIDAÇÃO DO NÚMERO: Usa getNumberId() para validar
     console.log(`🔍 Validando número ${number}...`);
     const validation = await validateWhatsAppNumber(client, number);
     
@@ -498,6 +535,7 @@ async function sendMessage(companySlug, number, message) {
     await client.sendMessage(chatId, message);
     console.log(`✅ Mensagem enviada com sucesso!`);
     
+    // Busca informações do contato (opcional, para logs/retorno)
     let contactInfo = {
       pushname: 'Desconhecido',
       chatName: chatId
@@ -535,15 +573,18 @@ async function sendMessage(companySlug, number, message) {
   } catch (error) {
     console.error(`❌ Erro ao enviar mensagem pelo cliente ${companySlug}:`, error.message);
     
+    // Se é erro 400 (número não válido), não marca como desconectado
     if (error.statusCode === 400 || error.message.includes('não é um usuário válido')) {
       throw error;
     }
     
+    // Se houve erro de conexão, marca como não conectado
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
       console.log(`🔄 Marcando cliente ${companySlug} como não conectado devido a erro no envio`);
     }
     
+    // Retorna erro mais específico
     if (error.message.includes('getChat') || error.message.includes('Cannot read properties') || error.message.includes('perdeu conexão')) {
       throw new Error(`Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`);
     }
