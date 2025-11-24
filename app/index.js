@@ -145,12 +145,6 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
       }
       
       console.error(errorMessage);
-      rollbar.warning(errorMessage, { 
-        companySlug, 
-        route: '/send-message/:companySlug',
-        action: 'company_not_connected',
-        status: quickStatus.status
-      });
       
       return res.status(422).json({
         error: "Empresa não conectada",
