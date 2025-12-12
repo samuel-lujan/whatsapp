@@ -524,16 +524,115 @@ async function findCorrectChatId(client, number) {
   }
 }
 
-// Função para enviar mensagem com verificação robusta
+async function validateWhatsAppNumber(client, number) {
+  let cleanNumber = number.replace(/\D/g, '');
+  
+  console.log(`🔢 Número original limpo: ${cleanNumber} (${cleanNumber.length} dígitos)`);
+  
+  if (!cleanNumber.startsWith('55')) {
+    // Se tem 11 dígitos (DDD + número), adiciona 55
+    if (cleanNumber.length === 11) {
+      cleanNumber = '55' + cleanNumber;
+      console.log(`➕ Adicionado código 55 (11 dígitos): ${cleanNumber}`);
+    }
+    // Se tem 10 dígitos (DDD + número sem 9), adiciona 55
+    else if (cleanNumber.length === 10) {
+      cleanNumber = '55' + cleanNumber;
+      console.log(`➕ Adicionado código 55 (10 dígitos): ${cleanNumber}`);
+    }
+    // Se tem menos de 10 dígitos, é inválido
+    else if (cleanNumber.length < 10) {
+      console.log(`⚠️ Número muito curto: ${cleanNumber.length} dígitos`);
+      return {
+        isValid: false,
+        originalNumber: number,
+        numberId: null,
+        error: `Número muito curto: ${cleanNumber.length} dígitos (mínimo 10)`
+      };
+    }
+    // Se tem mais de 11 mas não começa com 55, pode ser erro
+    else {
+      console.log(`⚠️ Número com formato inesperado: ${cleanNumber.length} dígitos sem código 55`);
+    }
+  }
+  
+  // Validação de formato básico
+  if (cleanNumber.length < 12 || cleanNumber.length > 13) {
+    console.log(`⚠️ Número com formato inválido: ${cleanNumber.length} dígitos (esperado 12 ou 13)`);
+    return {
+      isValid: false,
+      originalNumber: number,
+      numberId: null,
+      error: `Número com formato inválido: ${cleanNumber.length} dígitos`
+    };
+  }
+  
+  console.log(`🔍 Validando número: ${cleanNumber}`);
+  
+  // Lista de variações para testar
+  const variations = [cleanNumber];
+  
+  // Se tem 13 dígitos e o 5º caractere (índice 4) é '9', adiciona versão sem o 9
+  if (cleanNumber.length === 13 && cleanNumber.charAt(4) === '9') {
+    const withoutNine = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
+    variations.push(withoutNine);
+    console.log(`📋 Testando variações: [${cleanNumber}, ${withoutNine}]`);
+  } 
+  // Se tem 12 dígitos e o 5º caractere NÃO é '9', adiciona versão COM o 9
+  else if (cleanNumber.length === 12 && cleanNumber.charAt(4) !== '9') {
+    const withNine = cleanNumber.substring(0, 4) + '9' + cleanNumber.substring(4);
+    variations.push(withNine);
+    console.log(`📋 Testando variações: [${cleanNumber}, ${withNine}]`);
+  } else {
+    console.log(`📋 Testando apenas: [${cleanNumber}]`);
+  }
+  
+  // Testa cada variação usando getNumberId (muito mais rápido e confiável)
+  for (const variation of variations) {
+    try {
+      console.log(`🔎 Testando: ${variation}`);
+      const numberId = await client.getNumberId(variation);
+      
+      if (numberId) {
+        console.log(`✅ Número válido encontrado: ${numberId._serialized}`);
+        return {
+          isValid: true,
+          numberId: numberId._serialized,
+          originalNumber: number,
+          validatedNumber: variation,
+          wasAlternative: variation !== cleanNumber
+        };
+      }
+    } catch (error) {
+      console.log(`❌ Erro ao testar ${variation}: ${error.message}`);
+    }
+  }
+  
+  console.log(`⚠️ Nenhuma variação válida encontrada para ${cleanNumber}`);
+  return {
+    isValid: false,
+    originalNumber: number,
+    numberId: null
+  };
+}
+
+/**
+ * Envia mensagem para WhatsApp com validação automática do número
+ */
 async function sendMessage(companySlug, number, message) {
   if (!sessions[companySlug] || !sessions[companySlug].ready) {
     throw new Error(`Empresa ${companySlug} não está conectada ao WhatsApp`);
   }
 
+<<<<<<< HEAD
   // PRIMEIRA TENTATIVA: Verifica a saúde do cliente antes de enviar
   console.log(
     `🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`
   );
+=======
+  // Verifica a saúde do cliente antes de enviar
+  console.log(`🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`);
+>>>>>>> master
   const healthCheck = await verifyClientHealth(companySlug);
 
   if (!healthCheck.healthy) {
@@ -557,6 +656,7 @@ async function sendMessage(companySlug, number, message) {
   }
 
   try {
+<<<<<<< HEAD
     // Remove máscaras e formata para WhatsApp
     let cleanNumber = number.replace(/\D/g, ""); // Remove tudo que não é dígito
     console.log(
@@ -729,14 +829,57 @@ async function sendMessage(companySlug, number, message) {
       `✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para: ${contact.pushname}`
     );
 
+=======
+    const client = sessions[companySlug].client;
+    
+    // VALIDAÇÃO DO NÚMERO: Usa getNumberId() para validar
+    console.log(`🔍 Validando número ${number}...`);
+    const validation = await validateWhatsAppNumber(client, number);
+    
+    if (!validation.isValid) {
+      console.log(`❌ Número ${number} não é válido no WhatsApp`);
+      throw new Error(`Número ${number} não é um usuário válido do WhatsApp`);
+    }
+    
+    const chatId = validation.numberId;
+    console.log(`✅ Número validado: ${chatId}${validation.wasAlternative ? ' (versão alternativa)' : ''}`);
+    
+    // ENVIO DA MENSAGEM
+    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`);
+    await client.sendMessage(chatId, message);
+    console.log(`✅ Mensagem enviada com sucesso!`);
+    
+    // Busca informações do contato (opcional, para logs/retorno)
+    let contactInfo = {
+      pushname: 'Desconhecido',
+      chatName: chatId
+    };
+    
+    try {
+      const chat = await client.getChatById(chatId);
+      const contact = await chat.getContact();
+      contactInfo = {
+        pushname: contact.pushname || 'Sem nome',
+        chatName: chat.name || chatId,
+        isMyContact: contact.isMyContact
+      };
+      console.log(`👤 Informações do contato: ${contactInfo.pushname}`);
+    } catch (e) {
+      console.log(`⚠️ Não foi possível obter informações do contato: ${e.message}`);
+    }
+    
+>>>>>>> master
     return {
       success: true,
       message: "Mensagem enviada com sucesso",
       data: {
         companySlug,
         number: chatId,
-        chatName: chat.name,
-        userPushname: contact.pushname,
+        originalNumber: number,
+        validatedNumber: validation.validatedNumber,
+        wasAlternative: validation.wasAlternative,
+        chatName: contactInfo.chatName,
+        userPushname: contactInfo.pushname,
         content: message,
         timestamp: new Date().toISOString(),
       },
@@ -748,11 +891,16 @@ async function sendMessage(companySlug, number, message) {
     );
 
     // Se é erro 400 (número não válido), não marca como desconectado
-    if (error.statusCode === 400) {
+    if (error.statusCode === 400 || error.message.includes('não é um usuário válido')) {
       throw error;
     }
+<<<<<<< HEAD
 
     // Se houve erro, marca como não conectado
+=======
+    
+    // Se houve erro de conexão, marca como não conectado
+>>>>>>> master
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
       console.log(
@@ -761,6 +909,7 @@ async function sendMessage(companySlug, number, message) {
     }
 
     // Retorna erro mais específico
+<<<<<<< HEAD
     if (
       error.message.includes("getChat") ||
       error.message.includes("Cannot read properties")
@@ -768,13 +917,16 @@ async function sendMessage(companySlug, number, message) {
       throw new Error(
         `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`
       );
+=======
+    if (error.message.includes('getChat') || error.message.includes('Cannot read properties') || error.message.includes('perdeu conexão')) {
+      throw new Error(`Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`);
+>>>>>>> master
     }
 
     throw new Error(`Erro ao enviar mensagem: ${error.message}`);
   }
 }
 
-// Função para obter cliente de uma empresa
 function getClient(companySlug) {
   if (sessions[companySlug] && sessions[companySlug].ready) {
     return sessions[companySlug].client;
