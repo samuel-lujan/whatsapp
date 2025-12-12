@@ -1,69 +1,151 @@
 import { Client } from "@langchain/langgraph-sdk";
 
-const client = new Client({ apiUrl: "http://localhost:2024" });
-// Using the graph deployed with the name "agent"
-const assistantId = "cbd62771-07ef-4c3a-bc76-9fd03be6fa94";
+const crypto = require("crypto");
 
-const SESSION_CACHE = [];
+const client = new Client({ apiUrl: "http://localhost:8130" });
+// Using the graph deployed with the name "agent"
+const assistantId = "fe096781-5601-53d2-b2f6-0d3403f7e9ca";
+
+const CHAT_CACHE = [];
 
 const APP_TOKEN = process.env.APP_TOKEN;
 
 function getApiUrl(companySlug) {
   switch (companySlug) {
     default:
-      return "https://www.jusilveiraspinning.com.br/api/login";
+      return "https://www.jusilveiraspinning.com.br/api";
   }
 }
 
-async function cellphoneLogin(companySlug) {
+async function cellphoneLogin(companySlug, cellphone) {
+  console.log(cellphone);
   const url = getApiUrl(companySlug);
-  const result = await fetch(url, {
-    method: "POST",
+  const cleanedCellphone = clearCellphone(cellphone);
+  const loginData = await postLogin(url, { cellphone: cleanedCellphone });
+
+  return loginData.token;
+}
+
+async function getNameAndPermissions(companySlug, token) {
+  const url = getApiUrl(companySlug);
+  const userData = await getUser(url, token);
+
+  return {
+    name: userData.name,
+    is_in_ai_white_list: userData.is_in_ai_white_list,
+    is_able_to_schedule_from_ai: userData.is_able_to_schedule_from_ai,
+  };
+}
+
+async function getUser(url, token) {
+  const response = await fetch(`${url}/user`, {
+    method: "GET",
     headers: {
       Accept: "application/json",
-      Authorization: "Bearer " + APP_TOKEN,
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     },
   });
 
-  return result;
+  if (!response.ok) {
+    throw new Error(
+      `Erro ao buscar info do telefone ${body.cellphone}, Status: ${response.status}`
+    );
+  }
+
+  return await response.json();
 }
 
-async function getSession(sessionId, companySlug) {
-  const foundSession = SESSION_CACHE.find(
+async function postLogin(url, body) {
+  const response = await fetch(`${url}/login`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${APP_TOKEN}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Erro ao tentar logar com número de telefone ${body.cellphone}, Status: ${response.status}`
+    );
+  }
+
+  return await response.json();
+}
+
+function clearCellphone(cellphone) {
+  let cleanedCellphone = cellphone.replace(/\D/g, "");
+  if (cleanedCellphone.startsWith("55")) {
+    cleanedCellphone = cleanedCellphone.slice(2);
+  }
+  console.log("Cleaned Cellphone: ", cleanedCellphone);
+  return cleanedCellphone;
+}
+
+async function getSession(companySlug, cellphone, msgTimestamp) {
+  const sessionId = crypto
+    .createHash("sha256")
+    .update(`${message.from}${message.to}`, "utf8")
+    .digest("hex");
+
+  const foundIndex = CHAT_CACHE.findIndex(
     (session) => session.sessionId === sessionId
   );
 
-  if (foundSession) {
-    console.log("Achei sessão em andamento para o ID: ", sessionId);
+  if (foundIndex > -1) {
+    const nowTimestamp = Math.floor(Date.now() / 1000);
+    if (nowTimestamp - CHAT_CACHE[foundIndex].lastUpdate > 3600) {
+      //isExpired: 1 hora
+      CHAT_CACHE.splice(foundIndex, 1);
+      console.log("Sessão expirada para o ID: ", sessionId);
+    } else {
+      console.log("Achei sessão em andamento para o ID: ", sessionId);
+      const session = CHAT_CACHE[foundIndex];
+      session.lastUpdate = msgTimestamp;
 
-    return foundSession;
+      const user = await getNameAndPermissions(companySlug, session.authToken);
+
+      return user.name, session;
+    }
   } else {
-    console.log(`Nenhuma sessão para o ID: ${sessionId}.`);
+    console.log("Nenhuma sessão encontrada para o ID: ", sessionId);
+  }
 
-    const loginResponse = await cellphoneLogin(companySlug);
-    if (loginResponse.ok) {
-      console.log(`Criando nova sessão[${sessionId}].`);
+  try {
+    const authToken = await cellphoneLogin(companySlug, cellphone);
+    const user = await getNameAndPermissions(companySlug, authToken);
+    if (user.is_in_ai_white_list) {
+      console.log(`Criando nova sessão. [${sessionId}].`);
       const thread = await client.threads.create({
         metadata: { sessionId: sessionId },
       });
 
-      const loginJson = loginResponse.json();
-      const token = loginJson["token"];
+      if (!thread.thread_id) {
+        throw new Error("Thread não foi criada!");
+      }
 
       const newSession = {
         sessionId: sessionId,
         threadId: thread.thread_id,
-        token: token,
+        authToken: authToken,
+        lastUpdate: msgTimestamp,
       };
 
-      SESSION_CACHE.push(newSession);
+      CHAT_CACHE.push(newSession);
 
-      return newSession;
-    } else if (loginResponse.status === 422) {
-      console.log(`Número não reconhecido como cliente ${sessionId}`);
-      return false;
+      console.log(`Sessão criada. [${sessionId}].`);
+
+      return user.name, newSession;
+    } else {
+      console.log("Número sem permissão para IA.");
     }
+  } catch (e) {
+    console.log(e.message);
   }
+  return null, null;
 }
 
 async function findThread(sessionId) {
@@ -75,31 +157,45 @@ async function findThread(sessionId) {
   return threads;
 }
 
-function prepareInput(message, token) {
+function prepareInput(message, token, name) {
   return {
-    messages: [{ role: "user", content: message, token: token }],
+    messages: [{ role: "user", content: message }],
+    auth_token: token,
+    user_name: name,
   };
 }
 
-export async function talkToAI(message, sessionId, companySlug) {
-  const session = getSession(sessionId, companySlug);
-
-  if (session) {
-    console.log("ID da thread: ", session.threadId);
-
-    const input = prepareInput(message, session.token);
-    const statelessRunResult = await client.runs.wait(
-      session.threadId,
-      assistantId,
-      {
-        input: input,
-      }
+export async function getAiReponse(message, chat, companySlug) {
+  if (message.type === "chat" && !chat.isGroup) {
+    const [userName, session] = await getSession(
+      companySlug,
+      message.from,
+      message.timestamp
     );
-    console.log(statelessRunResult);
 
-    const thread_messages = statelessRunResult["messages"];
-    return thread_messages[thread_messages.length - 1]["content"];
+    if (session) {
+      console.log("ID da thread: ", session.threadId);
+
+      try {
+        const input = prepareInput(message, session.authToken, userName);
+        const statelessRunResult = await client.runs.wait(
+          session.threadId,
+          assistantId,
+          {
+            input: input,
+          }
+        );
+
+        const thread_messages = statelessRunResult["messages"];
+        return {
+          success: true,
+          body: thread_messages[thread_messages.length - 1]["content"],
+        };
+      } catch (e) {
+        console.log("Erro ao comunicar com LangGraph: ", e.message);
+      }
+    }
   }
 
-  return false;
+  return { success: false };
 }
