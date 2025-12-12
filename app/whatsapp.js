@@ -624,15 +624,8 @@ async function sendMessage(companySlug, number, message) {
     throw new Error(`Empresa ${companySlug} não está conectada ao WhatsApp`);
   }
 
-<<<<<<< HEAD
-  // PRIMEIRA TENTATIVA: Verifica a saúde do cliente antes de enviar
-  console.log(
-    `🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`
-  );
-=======
   // Verifica a saúde do cliente antes de enviar
   console.log(`🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`);
->>>>>>> master
   const healthCheck = await verifyClientHealth(companySlug);
 
   if (!healthCheck.healthy) {
@@ -656,180 +649,6 @@ async function sendMessage(companySlug, number, message) {
   }
 
   try {
-<<<<<<< HEAD
-    // Remove máscaras e formata para WhatsApp
-    let cleanNumber = number.replace(/\D/g, ""); // Remove tudo que não é dígito
-    console.log(
-      `🔢 Número após limpeza: ${cleanNumber} (${cleanNumber.length} dígitos)`
-    );
-
-    // Adiciona 55 APENAS se não começar com 55
-    if (!cleanNumber.startsWith("55")) {
-      cleanNumber = "55" + cleanNumber;
-      console.log(`➕ Adicionado código 55: ${cleanNumber}`);
-    } else {
-      console.log(`✅ Número já tem código 55: ${cleanNumber}`);
-    }
-
-    // Formata para o padrão do WhatsApp
-    let chatId = cleanNumber + "@c.us";
-    console.log(`📱 ChatId final: ${chatId}`);
-
-    const client = sessions[companySlug].client;
-    console.log(`🔍 Procurando chat para ${chatId}`);
-
-    // PRIMEIRA VERIFICAÇÃO: Procura o chat original - sem timeout, leva o tempo que for
-    let chat = null;
-    let contact = null;
-    let isValidWhatsAppUser = false;
-
-    console.log(
-      `🔍 Verificando se ${chatId} é um usuário válido do WhatsApp...`
-    );
-    try {
-      chat = await client.getChatById(chatId);
-      contact = await chat.getContact();
-
-      // Verifica se é realmente um usuário válido do WhatsApp
-      if (
-        contact &&
-        contact.pushname !== null &&
-        contact.pushname !== undefined &&
-        contact.pushname !== ""
-      ) {
-        console.log(
-          `✅ Usuário válido encontrado - Pushname: ${contact.pushname}`
-        );
-        isValidWhatsAppUser = true;
-      } else {
-        console.log(
-          `⚠️ Chat encontrado mas pushname inválido: ${
-            contact?.pushname || "undefined/null"
-          }`
-        );
-        isValidWhatsAppUser = false;
-      }
-    } catch (e) {
-      console.log(
-        `❌ Não é um usuário válido do WhatsApp: ${chatId} - ${e.message}`
-      );
-      isValidWhatsAppUser = false;
-    }
-    // SEGUNDA VERIFICAÇÃO: Se não é usuário válido, tenta remover o 9 (APENAS quando necessário)
-    if (!isValidWhatsAppUser) {
-      console.log(
-        `🔄 Número original não é usuário válido do WhatsApp, tentando versão sem o 9...`
-      );
-
-      // Se o número tem pelo menos 13 dígitos e tem 9 na posição correta (após DDD)
-      if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === "9") {
-        const alternativeNumber =
-          cleanNumber.substring(0, 4) + cleanNumber.substring(5);
-        const alternativeChatId = alternativeNumber + "@c.us";
-        console.log(
-          `� Verificando se ${alternativeChatId} é um usuário válido do WhatsApp...`
-        );
-
-        try {
-          const alternativeChat = await client.getChatById(alternativeChatId);
-          const alternativeContact = await alternativeChat.getContact();
-
-          // Verifica se o número alternativo é um usuário válido
-          if (
-            alternativeChat &&
-            alternativeContact &&
-            alternativeContact.pushname !== null &&
-            alternativeContact.pushname !== undefined &&
-            alternativeContact.pushname !== ""
-          ) {
-            console.log(
-              `✅ Usuário válido encontrado na versão alternativa - Pushname: ${alternativeContact.pushname}`
-            );
-            chat = alternativeChat;
-            contact = alternativeContact;
-            chatId = alternativeChatId;
-            isValidWhatsAppUser = true;
-          } else {
-            console.log(
-              `❌ Versão alternativa também não é usuário válido: pushname ${
-                alternativeContact?.pushname || "undefined/null"
-              }`
-            );
-          }
-        } catch (e) {
-          console.log(
-            `❌ Versão alternativa também não é usuário válido do WhatsApp: ${alternativeChatId} - ${e.message}`
-          );
-        }
-      } else {
-        console.log(
-          `❌ Número não tem formato esperado para remoção do 9 (${cleanNumber.length} dígitos)`
-        );
-      }
-    }
-
-    // Se ainda não encontrou um usuário com pushname válido, envia APENAS para a versão sem 9
-    if (!isValidWhatsAppUser) {
-      console.log(
-        `⚠️ Nenhum usuário com pushname válido encontrado no WhatsApp para ${number}`
-      );
-
-      // Se o número tem 9 na posição correta, envia APENAS para a versão sem 9
-      if (cleanNumber.length >= 13 && cleanNumber.charAt(4) === "9") {
-        const alternativeNumber =
-          cleanNumber.substring(0, 4) + cleanNumber.substring(5);
-        const alternativeChatId = alternativeNumber + "@c.us";
-        console.log(
-          `📱 Enviando APENAS para versão sem 9: ${alternativeChatId}`
-        );
-
-        // Envia APENAS para o número alternativo (sem 9)
-        console.log(
-          `📤 Enviando mensagem do cliente ${companySlug} para ${alternativeChatId} (versão sem 9)`
-        );
-
-        await client.sendMessage(alternativeChatId, message);
-
-        console.log(
-          `✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para versão sem 9: ${alternativeChatId}`
-        );
-
-        return {
-          success: true,
-          message: "Mensagem enviada com sucesso para versão sem 9",
-          data: {
-            companySlug,
-            number: alternativeChatId,
-            originalNumber: number,
-            chatName: alternativeChatId,
-            userPushname: "Usuário sem pushname válido",
-            content: message,
-            timestamp: new Date().toISOString(),
-            sentToAlternative: true,
-          },
-        };
-      } else {
-        console.log(
-          `❌ Número não tem formato esperado para remoção do 9, não enviando mensagem`
-        );
-        throw new Error(
-          `Número ${number} não é um usuário válido do WhatsApp e não tem formato para tentativa alternativa`
-        );
-      }
-    }
-
-    // ENVIO NORMAL: Se encontrou usuário válido, envia normalmente
-    console.log(
-      `📤 Enviando mensagem do cliente ${companySlug} para ${chatId} - Usuário: ${contact.pushname}`
-    );
-
-    await client.sendMessage(chatId, message);
-
-    console.log(
-      `✅ Mensagem enviada com sucesso pelo cliente ${companySlug} para: ${contact.pushname}`
-    );
-
-=======
     const client = sessions[companySlug].client;
     
     // VALIDAÇÃO DO NÚMERO: Usa getNumberId() para validar
@@ -868,7 +687,6 @@ async function sendMessage(companySlug, number, message) {
       console.log(`⚠️ Não foi possível obter informações do contato: ${e.message}`);
     }
     
->>>>>>> master
     return {
       success: true,
       message: "Mensagem enviada com sucesso",
@@ -894,13 +712,8 @@ async function sendMessage(companySlug, number, message) {
     if (error.statusCode === 400 || error.message.includes('não é um usuário válido')) {
       throw error;
     }
-<<<<<<< HEAD
-
-    // Se houve erro, marca como não conectado
-=======
     
     // Se houve erro de conexão, marca como não conectado
->>>>>>> master
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
       console.log(
@@ -909,18 +722,8 @@ async function sendMessage(companySlug, number, message) {
     }
 
     // Retorna erro mais específico
-<<<<<<< HEAD
-    if (
-      error.message.includes("getChat") ||
-      error.message.includes("Cannot read properties")
-    ) {
-      throw new Error(
-        `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`
-      );
-=======
     if (error.message.includes('getChat') || error.message.includes('Cannot read properties') || error.message.includes('perdeu conexão')) {
       throw new Error(`Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`);
->>>>>>> master
     }
 
     throw new Error(`Erro ao enviar mensagem: ${error.message}`);

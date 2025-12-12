@@ -1,6 +1,5 @@
 import { Client } from "@langchain/langgraph-sdk";
-
-const crypto = require("crypto");
+import crypto from "crypto";
 
 const client = new Client({ apiUrl: "http://localhost:8130" });
 // Using the graph deployed with the name "agent"
