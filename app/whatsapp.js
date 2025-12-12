@@ -1,10 +1,8 @@
-const { talkToAI } = require("./langchain.js");
+const { getAiReponse } = require("./langchain.js");
 
 const { Client, LocalAuth } = require("whatsapp-web.js");
 
 const sessions = {};
-
-const crypto = require("crypto");
 
 async function getStatus(companySlug) {
   // PRIMEIRA VERIFICAÇÃO: Se já existe uma sessão conectada
@@ -327,31 +325,31 @@ async function createSession(companySlug) {
   });
 
   client.on("message", async (message) => {
-    const sessionId = crypto
-      .createHash("sha256")
-      .update(`${message.from}${message.to}`, "utf8")
-      .digest("hex");
-    console.log(`Menssagem na sessão ${sessionId}`);
+    const chat = await message.getChat();
+    const aiResponse = getAiReponse(message, chat, companySlug);
 
-    const chatId = message.from;
-    const response = await talkToAI(message.body, sessionId, companySlug);
+    if (aiResponse.success) {
+      await Promise.race([
+        client.sendMessage(message.from, aiResponse.body), // aqui
+        new Promise((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "Timeout ao enviar mensagem - cliente pode ter desconectado"
+                )
+              ),
+            15000
+          )
+        ),
+      ]);
 
-    await Promise.race([
-      client.sendMessage(chatId, response), // aqui
-      new Promise((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                "Timeout ao enviar mensagem - cliente pode ter desconectado"
-              )
-            ),
-          15000
-        )
-      ),
-    ]);
-
-    console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`);
+      console.log(
+        `✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`
+      );
+    } else {
+      await chat.markUnread(); // Marca como não lida se não for texto ou for grupo
+    }
   });
 
   sessions[companySlug].connecting = true;
