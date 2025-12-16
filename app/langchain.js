@@ -84,10 +84,10 @@ function clearCellphone(cellphone) {
   return cleanedCellphone;
 }
 
-async function getSession(companySlug, cellphone, msgTimestamp) {
+async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
   const sessionId = crypto
     .createHash("sha256")
-    .update(`${message.from}${message.to}`, "utf8")
+    .update(`${msgFrom}${msgTo}`, "utf8")
     .digest("hex");
 
   const foundIndex = CHAT_CACHE.findIndex(
@@ -105,16 +105,14 @@ async function getSession(companySlug, cellphone, msgTimestamp) {
       const session = CHAT_CACHE[foundIndex];
       session.lastUpdate = msgTimestamp;
 
-      const user = await getNameAndPermissions(companySlug, session.authToken);
-
-      return user.name, session;
+      return session;
     }
   } else {
     console.log("Nenhuma sessão encontrada para o ID: ", sessionId);
   }
 
   try {
-    const authToken = await cellphoneLogin(companySlug, cellphone);
+    const authToken = await cellphoneLogin(companySlug, msgFrom);
     const user = await getNameAndPermissions(companySlug, authToken);
     if (user.is_in_ai_white_list) {
       console.log(`Criando nova sessão. [${sessionId}].`);
@@ -131,20 +129,24 @@ async function getSession(companySlug, cellphone, msgTimestamp) {
         threadId: thread.thread_id,
         authToken: authToken,
         lastUpdate: msgTimestamp,
+        userName: user.name,
+        isWhiteList: user.is_in_ai_white_list,
+        isAbleToSchedule: user.is_able_to_schedule_from_ai,
       };
 
       CHAT_CACHE.push(newSession);
 
       console.log(`Sessão criada. [${sessionId}].`);
+      console.log(newSession);
 
-      return user.name, newSession;
+      return newSession;
     } else {
       console.log("Número sem permissão para IA.");
     }
   } catch (e) {
     console.log(e.message);
   }
-  return null, null;
+  return null;
 }
 
 async function findThread(sessionId) {
@@ -164,11 +166,12 @@ function prepareInput(message, token, name) {
   };
 }
 
-export async function getAiReponse(message, chat, companySlug) {
+export async function getAiResponse(message, chat, companySlug) {
   if (message.type === "chat" && !chat.isGroup) {
-    const [userName, session] = await getSession(
+    const session = await getSession(
       companySlug,
       message.from,
+      message.to,
       message.timestamp
     );
 
@@ -176,7 +179,11 @@ export async function getAiReponse(message, chat, companySlug) {
       console.log("ID da thread: ", session.threadId);
 
       try {
-        const input = prepareInput(message, session.authToken, userName);
+        const input = prepareInput(
+          message.body,
+          session.authToken,
+          session.userName
+        );
         const statelessRunResult = await client.runs.wait(
           session.threadId,
           assistantId,

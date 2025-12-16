@@ -1,4 +1,4 @@
-const { getAiReponse } = require("./langchain.js");
+const { getAiResponse } = require("./langchain.js");
 
 const { Client, LocalAuth } = require("whatsapp-web.js");
 
@@ -326,7 +326,7 @@ async function createSession(companySlug) {
 
   client.on("message", async (message) => {
     const chat = await message.getChat();
-    const aiResponse = getAiReponse(message, chat, companySlug);
+    const aiResponse = await getAiResponse(message, chat, companySlug);
 
     if (aiResponse.success) {
       await Promise.race([
@@ -590,19 +590,21 @@ async function findCorrectChatId(client, number) {
 }
 
 async function validateWhatsAppNumber(client, number) {
-  let cleanNumber = number.replace(/\D/g, '');
-  
-  console.log(`🔢 Número original limpo: ${cleanNumber} (${cleanNumber.length} dígitos)`);
-  
-  if (!cleanNumber.startsWith('55')) {
+  let cleanNumber = number.replace(/\D/g, "");
+
+  console.log(
+    `🔢 Número original limpo: ${cleanNumber} (${cleanNumber.length} dígitos)`
+  );
+
+  if (!cleanNumber.startsWith("55")) {
     // Se tem 11 dígitos (DDD + número), adiciona 55
     if (cleanNumber.length === 11) {
-      cleanNumber = '55' + cleanNumber;
+      cleanNumber = "55" + cleanNumber;
       console.log(`➕ Adicionado código 55 (11 dígitos): ${cleanNumber}`);
     }
     // Se tem 10 dígitos (DDD + número sem 9), adiciona 55
     else if (cleanNumber.length === 10) {
-      cleanNumber = '55' + cleanNumber;
+      cleanNumber = "55" + cleanNumber;
       console.log(`➕ Adicionado código 55 (10 dígitos): ${cleanNumber}`);
     }
     // Se tem menos de 10 dígitos, é inválido
@@ -612,52 +614,57 @@ async function validateWhatsAppNumber(client, number) {
         isValid: false,
         originalNumber: number,
         numberId: null,
-        error: `Número muito curto: ${cleanNumber.length} dígitos (mínimo 10)`
+        error: `Número muito curto: ${cleanNumber.length} dígitos (mínimo 10)`,
       };
     }
     // Se tem mais de 11 mas não começa com 55, pode ser erro
     else {
-      console.log(`⚠️ Número com formato inesperado: ${cleanNumber.length} dígitos sem código 55`);
+      console.log(
+        `⚠️ Número com formato inesperado: ${cleanNumber.length} dígitos sem código 55`
+      );
     }
   }
-  
+
   // Validação de formato básico
   if (cleanNumber.length < 12 || cleanNumber.length > 13) {
-    console.log(`⚠️ Número com formato inválido: ${cleanNumber.length} dígitos (esperado 12 ou 13)`);
+    console.log(
+      `⚠️ Número com formato inválido: ${cleanNumber.length} dígitos (esperado 12 ou 13)`
+    );
     return {
       isValid: false,
       originalNumber: number,
       numberId: null,
-      error: `Número com formato inválido: ${cleanNumber.length} dígitos`
+      error: `Número com formato inválido: ${cleanNumber.length} dígitos`,
     };
   }
-  
+
   console.log(`🔍 Validando número: ${cleanNumber}`);
-  
+
   // Lista de variações para testar
   const variations = [cleanNumber];
-  
+
   // Se tem 13 dígitos e o 5º caractere (índice 4) é '9', adiciona versão sem o 9
-  if (cleanNumber.length === 13 && cleanNumber.charAt(4) === '9') {
+  if (cleanNumber.length === 13 && cleanNumber.charAt(4) === "9") {
     const withoutNine = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
     variations.push(withoutNine);
     console.log(`📋 Testando variações: [${cleanNumber}, ${withoutNine}]`);
-  } 
+  }
   // Se tem 12 dígitos e o 5º caractere NÃO é '9', adiciona versão COM o 9
-  else if (cleanNumber.length === 12 && cleanNumber.charAt(4) !== '9') {
-    const withNine = cleanNumber.substring(0, 4) + '9' + cleanNumber.substring(4);
+  else if (cleanNumber.length === 12 && cleanNumber.charAt(4) !== "9") {
+    const withNine =
+      cleanNumber.substring(0, 4) + "9" + cleanNumber.substring(4);
     variations.push(withNine);
     console.log(`📋 Testando variações: [${cleanNumber}, ${withNine}]`);
   } else {
     console.log(`📋 Testando apenas: [${cleanNumber}]`);
   }
-  
+
   // Testa cada variação usando getNumberId (muito mais rápido e confiável)
   for (const variation of variations) {
     try {
       console.log(`🔎 Testando: ${variation}`);
       const numberId = await client.getNumberId(variation);
-      
+
       if (numberId) {
         console.log(`✅ Número válido encontrado: ${numberId._serialized}`);
         return {
@@ -665,14 +672,14 @@ async function validateWhatsAppNumber(client, number) {
           numberId: numberId._serialized,
           originalNumber: number,
           validatedNumber: variation,
-          wasAlternative: variation !== cleanNumber
+          wasAlternative: variation !== cleanNumber,
         };
       }
     } catch (error) {
       console.log(`❌ Erro ao testar ${variation}: ${error.message}`);
     }
   }
-  
+
   // FALLBACK: Se getNumberId() falhou mas o formato está correto, tenta enviar mesmo assim
   // Isso resolve o problema conhecido do whatsapp-web.js onde getNumberId() retorna null para números válidos
   console.log(`⚠️ getNumberId() falhou para todas as variações, usando fallback...`);
@@ -702,7 +709,9 @@ async function sendMessage(companySlug, number, message) {
   }
 
   // Verifica a saúde do cliente antes de enviar
-  console.log(`🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`);
+  console.log(
+    `🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`
+  );
   const healthCheck = await verifyClientHealth(companySlug);
 
   if (!healthCheck.healthy) {
@@ -746,27 +755,31 @@ async function sendMessage(companySlug, number, message) {
     console.log(`✅ Número validado: ${chatId}${validationInfo}`);
 
     // ENVIO DA MENSAGEM
-    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`);
+    console.log(
+      `📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`
+    );
     await client.sendMessage(chatId, message);
     console.log(`✅ Mensagem enviada com sucesso!`);
 
     // Busca informações do contato (opcional, para logs/retorno)
     let contactInfo = {
-      pushname: 'Desconhecido',
-      chatName: chatId
+      pushname: "Desconhecido",
+      chatName: chatId,
     };
 
     try {
       const chat = await client.getChatById(chatId);
       const contact = await chat.getContact();
       contactInfo = {
-        pushname: contact.pushname || 'Sem nome',
+        pushname: contact.pushname || "Sem nome",
         chatName: chat.name || chatId,
-        isMyContact: contact.isMyContact
+        isMyContact: contact.isMyContact,
       };
       console.log(`👤 Informações do contato: ${contactInfo.pushname}`);
     } catch (e) {
-      console.log(`⚠️ Não foi possível obter informações do contato: ${e.message}`);
+      console.log(
+        `⚠️ Não foi possível obter informações do contato: ${e.message}`
+      );
     }
 
     return {
@@ -788,26 +801,33 @@ async function sendMessage(companySlug, number, message) {
     console.error(`❌ Erro ao enviar mensagem pelo cliente ${companySlug}:`, error.message);
 
     // Se é erro 400 (número não válido), não marca como desconectado
-    if (error.statusCode === 400 || error.message.includes('não é um usuário válido')) {
+    if (
+      error.statusCode === 400 ||
+      error.message.includes("não é um usuário válido")
+    ) {
       throw error;
     }
 
     // IMPORTANTE: Erros internos da biblioteca whatsapp-web.js que NÃO indicam desconexão
     // Esses erros podem ocorrer mesmo com conexão ativa e geralmente são temporários
     const knownLibraryBugs = [
-      'markedUnread',      // Bug conhecido da biblioteca
-      'isNewMsg',          // Bug similar
-      'Cannot read properties of undefined'  // Erro genérico da biblioteca que não indica desconexão
+      "markedUnread", // Bug conhecido da biblioteca
+      "isNewMsg", // Bug similar
+      "Cannot read properties of undefined", // Erro genérico da biblioteca que não indica desconexão
     ];
 
-    const isKnownLibraryBug = knownLibraryBugs.some(bug => error.message.includes(bug));
+    const isKnownLibraryBug = knownLibraryBugs.some((bug) =>
+      error.message.includes(bug)
+    );
 
     if (isKnownLibraryBug) {
-      console.log(`⚠️ Erro interno da biblioteca whatsapp-web.js (não é desconexão): ${error.message}`);
+      console.log(
+        `⚠️ Erro interno da biblioteca whatsapp-web.js (não é desconexão): ${error.message}`
+      );
       console.log(`🔄 Tentando enviar novamente em 1 segundo...`);
 
       // Aguarda 1 segundo e tenta novamente
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       try {
         const client = sessions[companySlug].client;
@@ -820,15 +840,15 @@ async function sendMessage(companySlug, number, message) {
 
           return {
             success: true,
-            message: 'Mensagem enviada com sucesso (após retry)',
+            message: "Mensagem enviada com sucesso (após retry)",
             data: {
               companySlug,
               number: validation.numberId,
               originalNumber: number,
               content: message,
               timestamp: new Date().toISOString(),
-              wasRetry: true
-            }
+              wasRetry: true,
+            },
           };
         }
       } catch (retryError) {
@@ -849,8 +869,14 @@ async function sendMessage(companySlug, number, message) {
     }
 
     // Erros que realmente indicam perda de conexão
-    if (error.message.includes('getChat') || error.message.includes('perdeu conexão') || error.message.includes('Protocol error')) {
-      throw new Error(`Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`);
+    if (
+      error.message.includes("getChat") ||
+      error.message.includes("perdeu conexão") ||
+      error.message.includes("Protocol error")
+    ) {
+      throw new Error(
+        `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`
+      );
     }
 
     throw new Error(`Erro ao enviar mensagem: ${error.message}`);
