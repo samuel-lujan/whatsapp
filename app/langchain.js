@@ -8,6 +8,7 @@ const assistantId = "fe096781-5601-53d2-b2f6-0d3403f7e9ca";
 const CHAT_CACHE = [];
 
 const APP_TOKEN = process.env.APP_TOKEN;
+const BETA_HASH = process.env.BETA_HASH;
 
 function getApiUrl(companySlug) {
   switch (companySlug) {
@@ -17,7 +18,6 @@ function getApiUrl(companySlug) {
 }
 
 async function cellphoneLogin(companySlug, cellphone) {
-  console.log(cellphone);
   const url = getApiUrl(companySlug);
   const cleanedCellphone = clearCellphone(cellphone);
   const loginData = await postLogin(url, { cellphone: cleanedCellphone });
@@ -80,11 +80,20 @@ function clearCellphone(cellphone) {
   if (cleanedCellphone.startsWith("55")) {
     cleanedCellphone = cleanedCellphone.slice(2);
   }
-  console.log("Cleaned Cellphone: ", cleanedCellphone);
+  //console.log("Cleaned Cellphone: ", cleanedCellphone);
   return cleanedCellphone;
 }
 
 async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
+  const receiver_hash = crypto
+    .createHash("sha256")
+    .update(`${msgTo}`, "utf8")
+    .digest("hex");
+
+  if (receiver_hash != BETA_HASH) {
+    return null;
+  }
+
   const sessionId = crypto
     .createHash("sha256")
     .update(`${msgFrom}${msgTo}`, "utf8")
