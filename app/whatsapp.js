@@ -791,9 +791,85 @@ function listSessions() {
   return sessionList;
 }
 
+// Função para deletar todas as empresas e sessões (incluindo dados persistidos)
+async function deleteAllCompaniesAndSessions() {
+  const fs = require('fs').promises;
+  const path = require('path');
+  
+  const results = {
+    sessionsCleared: {},
+    authDataDeleted: false,
+    cacheDeleted: false
+  };
+  
+  console.log(`🗑️ Iniciando exclusão de TODAS as empresas e sessões...`);
+  
+  // 1. Primeiro limpa todas as sessões ativas em memória
+  const sessionKeys = Object.keys(sessions);
+  console.log(`📋 Sessões ativas encontradas: ${sessionKeys.length}`);
+  
+  for (const companySlug of sessionKeys) {
+    try {
+      const result = await clearSession(companySlug);
+      results.sessionsCleared[companySlug] = result;
+    } catch (error) {
+      results.sessionsCleared[companySlug] = {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+  
+  // 2. Remove diretório de autenticação (.wwebjs_auth)
+  const authPath = path.resolve(__dirname, '..', '.wwebjs_auth');
+  try {
+    await fs.rm(authPath, { recursive: true, force: true });
+    results.authDataDeleted = true;
+    console.log(`✅ Diretório de autenticação removido: ${authPath}`);
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.log(`⚠️ Erro ao remover diretório de autenticação: ${error.message}`);
+      results.authDataError = error.message;
+    } else {
+      results.authDataDeleted = true; // Não existia, considera como sucesso
+      console.log(`ℹ️ Diretório de autenticação não existia`);
+    }
+  }
+  
+  // 3. Remove diretório de cache (.wwebjs_cache) - opcional
+  const cachePath = path.resolve(__dirname, '..', '.wwebjs_cache');
+  try {
+    await fs.rm(cachePath, { recursive: true, force: true });
+    results.cacheDeleted = true;
+    console.log(`✅ Diretório de cache removido: ${cachePath}`);
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.log(`⚠️ Erro ao remover diretório de cache: ${error.message}`);
+      results.cacheError = error.message;
+    } else {
+      results.cacheDeleted = true; // Não existia, considera como sucesso
+      console.log(`ℹ️ Diretório de cache não existia`);
+    }
+  }
+  
+  const successCount = Object.values(results.sessionsCleared).filter(r => r.success).length;
+  
+  return {
+    success: true,
+    message: `Todas as empresas e sessões foram deletadas`,
+    summary: {
+      totalSessions: sessionKeys.length,
+      sessionsCleared: successCount,
+      authDataDeleted: results.authDataDeleted,
+      cacheDeleted: results.cacheDeleted
+    },
+    details: results
+  };
+}
+
 // Função para fazer logout de todas as sessões ativas
 async function clearAllSessions() {
-  const results = {};
+  const results = {}
   const sessionKeys = Object.keys(sessions);
   
   console.log(`🧹 Iniciando limpeza de todas as sessões (${sessionKeys.length} sessões)`);
@@ -846,6 +922,7 @@ module.exports = {
   getClient,
   clearSession,
   clearAllSessions,
+  deleteAllCompaniesAndSessions,
   listSessions,
   searchNumberInfo
 };
