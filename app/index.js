@@ -145,12 +145,6 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
       }
       
       console.error(errorMessage);
-      rollbar.warning(errorMessage, { 
-        companySlug, 
-        route: '/send-message/:companySlug',
-        action: 'company_not_connected',
-        status: quickStatus.status
-      });
       
       return res.status(422).json({
         error: "Empresa não conectada",
@@ -360,6 +354,40 @@ app.delete("/clear-all", authenticateToken, async (req, res) => {
   }
 });
 
+// Rota para deletar TODAS as empresas e sessões (incluindo dados persistidos)
+app.delete("/delete-all", authenticateToken, async (req, res) => {
+  try {
+    console.log(`🗑️ Solicitação de EXCLUSÃO de todas as empresas e sessões`);
+    
+    if (whatsapp.deleteAllCompaniesAndSessions) {
+      const result = await whatsapp.deleteAllCompaniesAndSessions();
+      
+      console.log(`✅ Exclusão completa concluída:`, result.summary);
+      res.json({
+        success: true,
+        message: result.message,
+        summary: result.summary,
+        details: result.details,
+        timestamp: new Date().toISOString(),
+        warning: "Todos os dados de autenticação foram removidos. As empresas precisarão escanear o QR Code novamente."
+      });
+    } else {
+      res.status(500).json({ 
+        error: "Função deleteAllCompaniesAndSessions não disponível",
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error(`❌ Erro ao deletar todas as empresas e sessões:`, error.message);
+    rollbar.error(error, { route: '/delete-all' });
+    res.status(500).json({ 
+      error: error.message,
+      timestamp: new Date().toISOString(),
+      suggestion: "Tente novamente ou verifique os logs do servidor"
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor multi-tenant WhatsApp rodando na porta ${PORT}`);
   console.log(`\nRotas disponíveis:`);
@@ -370,7 +398,8 @@ app.listen(PORT, () => {
   console.log(`GET  /health/:companySlug - Verificar saúde do cliente`);
   console.log(`GET  /search-number/:companySlug/:number - Buscar info de número (NEW!)`);
   console.log(`DELETE /clear/:companySlug - Limpar sessão e desconectar WhatsApp`);
-  console.log(`DELETE /clear-all - Limpar TODAS as sessões e desconectar (NEW!)`);
+  console.log(`DELETE /clear-all - Limpar TODAS as sessões e desconectar`);
+  console.log(`DELETE /delete-all - DELETAR todas as empresas e sessões (inclui dados persistidos) (NEW!)`);
   console.log(`\n🔧 Melhorias implementadas:`);
   console.log(`   ✅ Detecção inteligente de sessões já conectadas`);
   console.log(`   ✅ Verificação robusta do estado real da conexão`);
