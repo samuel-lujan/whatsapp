@@ -16,19 +16,37 @@ async function getStatus(companySlug) {
     try {
       // Tenta uma operação que só funciona se estiver conectado
       const client = sessions[companySlug].client;
-      const info = await Promise.race([
+      const state = await Promise.race([
         client.getState(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
       ]);
       
-      console.log(`📱 Estado atual do cliente ${companySlug}:`, info);
+      console.log(`📱 Estado atual do cliente ${companySlug}:`, state);
       
-      if (info === 'CONNECTED') {
+      // Estados que indicam conexão ativa
+      if (state === 'CONNECTED') {
         console.log(`🔧 Cliente ${companySlug} estava conectado mas não marcado como ready - corrigindo...`);
         sessions[companySlug].ready = true;
         sessions[companySlug].connecting = false;
         sessions[companySlug].qrCode = null;
         return { connected: true };
+      }
+      
+      // Se o estado é null/undefined, tenta verificação alternativa
+      if (state === null || state === undefined) {
+        console.log(`🔍 Estado ambíguo para ${companySlug}, tentando verificação prática...`);
+        try {
+          const info = client.info;
+          if (info && info.wid) {
+            console.log(`🔧 Cliente ${companySlug} tem info válida - marcando como ready`);
+            sessions[companySlug].ready = true;
+            sessions[companySlug].connecting = false;
+            sessions[companySlug].qrCode = null;
+            return { connected: true };
+          }
+        } catch (e) {
+          console.log(`⚠️ Verificação alternativa falhou para ${companySlug}:`, e.message);
+        }
       }
       
     } catch (error) {
@@ -144,10 +162,10 @@ async function createSession(companySlug) {
   
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: companySlug }),
-    puppeteer: { 
+    puppeteer: {
       headless: isHeadless,
       args: [
-        '--no-sandbox', 
+        '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
@@ -156,6 +174,12 @@ async function createSession(companySlug) {
         '--single-process',
         '--disable-gpu'
       ]
+    },
+    // Workaround para bug "markedUnread" - usa versão específica do WhatsApp Web
+    // Issue: https://github.com/pedroslopez/whatsapp-web.js/issues/5718
+    webVersionCache: {
+      type: 'remote',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/refs/heads/main/html/2.3000.1031490220-alpha.html',
     }
   });
 
@@ -279,37 +303,88 @@ async function verifyClientHealth(companySlug) {
   const client = sessions[companySlug].client;
   
   try {
-    // Tenta várias verificações para garantir que está funcionando
-    const checks = await Promise.all([
-      // Verifica estado
-      Promise.race([
+    // Primeiro verifica se a página do puppeteer ainda está ativa
+    if (client.pupPage) {
+      try {
+        const isClosed = client.pupPage.isClosed();
+        if (isClosed) {
+          console.log(`❌ Cliente ${companySlug} - página do browser está fechada`);
+          return { healthy: false, reason: 'Página do browser fechada', shouldReconnect: true };
+        }
+      } catch (e) {
+        console.log(`⚠️ Erro ao verificar página do browser para ${companySlug}:`, e.message);
+      }
+    }
+
+    // Tenta obter o estado do cliente
+    let state = null;
+    try {
+      state = await Promise.race([
         client.getState(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-state')), 3000))
-      ]),
-      
-      // Tenta obter informações básicas
-      Promise.race([
-        client.info,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-info')), 3000))
-      ]).catch(() => null) // Não falha se info não estiver disponível
-    ]);
-    
-    const [state, info] = checks;
-    
-    if (state !== 'CONNECTED') {
-      console.log(`⚠️ Cliente ${companySlug} não está no estado CONNECTED (atual: ${state})`);
-      return { 
-        healthy: false, 
-        reason: `Estado inválido: ${state}`,
-        shouldReconnect: true 
-      };
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-state')), 5000))
+      ]);
+      console.log(`📊 Estado do cliente ${companySlug}: ${state}`);
+    } catch (e) {
+      console.log(`⚠️ Timeout ao obter estado do cliente ${companySlug}, tentando verificação alternativa...`);
     }
     
-    console.log(`✅ Cliente ${companySlug} passou na verificação de saúde`);
+    // Estados aceitáveis - CONNECTED é o ideal, mas null/undefined pode ocorrer quando conectado
+    const acceptableStates = ['CONNECTED', null, undefined];
+    
+    // Se o estado é CONNECTED, está saudável
+    if (state === 'CONNECTED') {
+      console.log(`✅ Cliente ${companySlug} está CONNECTED`);
+      return { healthy: true, state, info: 'N/A' };
+    }
+    
+    // Se o estado é explicitamente desconectado, não está saudável
+    const disconnectedStates = ['CONFLICT', 'UNPAIRED', 'UNLAUNCHED', 'PROXYBLOCK', 'TOS_BLOCK', 'SMB_TOS_BLOCK'];
+    if (disconnectedStates.includes(state)) {
+      console.log(`❌ Cliente ${companySlug} está em estado de desconexão: ${state}`);
+      return { healthy: false, reason: `Estado de desconexão: ${state}`, shouldReconnect: true };
+    }
+    
+    // Para outros estados (null, undefined, OPENING, PAIRING, etc.), 
+    // tenta uma verificação prática: obter info do cliente
+    console.log(`🔍 Estado ambíguo (${state}), tentando verificação prática para ${companySlug}...`);
+    
+    try {
+      // Tenta obter informações básicas do cliente - isso só funciona se conectado
+      const info = await Promise.race([
+        Promise.resolve(client.info),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-info')), 3000))
+      ]);
+      
+      if (info && info.wid) {
+        console.log(`✅ Cliente ${companySlug} tem info válida: ${info.wid._serialized}`);
+        return { healthy: true, state: state || 'ASSUMED_CONNECTED', info: info.wid._serialized };
+      }
+    } catch (e) {
+      console.log(`⚠️ Não conseguiu obter info do cliente ${companySlug}: ${e.message}`);
+    }
+    
+    // Última tentativa: verificar se consegue listar chats (operação leve)
+    try {
+      console.log(`🔍 Tentativa final: listando chats para ${companySlug}...`);
+      const chats = await Promise.race([
+        client.getChats(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-chats')), 5000))
+      ]);
+      
+      if (chats && Array.isArray(chats)) {
+        console.log(`✅ Cliente ${companySlug} conseguiu listar ${chats.length} chats - está funcional`);
+        return { healthy: true, state: state || 'FUNCTIONAL', info: `${chats.length} chats` };
+      }
+    } catch (e) {
+      console.log(`❌ Cliente ${companySlug} não conseguiu listar chats: ${e.message}`);
+    }
+    
+    // Se chegou aqui, não está saudável
+    console.log(`❌ Cliente ${companySlug} falhou em todas as verificações de saúde`);
     return { 
-      healthy: true, 
-      state, 
-      info: info ? info.wid._serialized : 'N/A' 
+      healthy: false, 
+      reason: `Estado: ${state || 'desconhecido'} - falhou nas verificações práticas`,
+      shouldReconnect: true 
     };
     
   } catch (error) {
@@ -572,23 +647,71 @@ async function sendMessage(companySlug, number, message) {
     
   } catch (error) {
     console.error(`❌ Erro ao enviar mensagem pelo cliente ${companySlug}:`, error.message);
-    
+
     // Se é erro 400 (número não válido), não marca como desconectado
     if (error.statusCode === 400 || error.message.includes('não é um usuário válido')) {
       throw error;
     }
-    
-    // Se houve erro de conexão, marca como não conectado
+
+    // IMPORTANTE: Erros internos da biblioteca whatsapp-web.js que NÃO indicam desconexão
+    // Esses erros podem ocorrer mesmo com conexão ativa e geralmente são temporários
+    const knownLibraryBugs = [
+      'markedUnread',      // Bug conhecido da biblioteca
+      'isNewMsg',          // Bug similar
+      'Cannot read properties of undefined'  // Erro genérico da biblioteca que não indica desconexão
+    ];
+
+    const isKnownLibraryBug = knownLibraryBugs.some(bug => error.message.includes(bug));
+
+    if (isKnownLibraryBug) {
+      console.log(`⚠️ Erro interno da biblioteca whatsapp-web.js (não é desconexão): ${error.message}`);
+      console.log(`🔄 Tentando enviar novamente em 1 segundo...`);
+
+      // Aguarda 1 segundo e tenta novamente
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        const client = sessions[companySlug].client;
+        const validation = await validateWhatsAppNumber(client, number);
+
+        if (validation.isValid) {
+          console.log(`📤 Reenviando mensagem para ${validation.numberId}...`);
+          await client.sendMessage(validation.numberId, message);
+          console.log(`✅ Mensagem reenviada com sucesso!`);
+
+          return {
+            success: true,
+            message: 'Mensagem enviada com sucesso (após retry)',
+            data: {
+              companySlug,
+              number: validation.numberId,
+              originalNumber: number,
+              content: message,
+              timestamp: new Date().toISOString(),
+              wasRetry: true
+            }
+          };
+        }
+      } catch (retryError) {
+        console.error(`❌ Erro no retry:`, retryError.message);
+        // Se falhar no retry, continua com o fluxo normal de erro
+      }
+
+      // Se o retry também falhou, lança erro sem marcar como desconectado
+      throw new Error(`Erro temporário ao enviar mensagem. Tente novamente.`);
+    }
+
+    // Se houve erro de conexão real, marca como não conectado
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
       console.log(`🔄 Marcando cliente ${companySlug} como não conectado devido a erro no envio`);
     }
-    
-    // Retorna erro mais específico
-    if (error.message.includes('getChat') || error.message.includes('Cannot read properties') || error.message.includes('perdeu conexão')) {
+
+    // Erros que realmente indicam perda de conexão
+    if (error.message.includes('getChat') || error.message.includes('perdeu conexão') || error.message.includes('Protocol error')) {
       throw new Error(`Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`);
     }
-    
+
     throw new Error(`Erro ao enviar mensagem: ${error.message}`);
   }
 }
