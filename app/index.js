@@ -133,16 +133,32 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
 
   try {
     // Verifica se a empresa está conectada antes de enviar
-    const quickStatus = whatsapp.checkConnectionStatus(companySlug);
+    // Usa verificação completa ao invés de quick check para evitar falsos negativos
+    console.log(`🔍 Verificando conexão da empresa ${companySlug} antes de enviar...`);
+    
+    // Primeiro tenta quick check
+    let quickStatus = whatsapp.checkConnectionStatus(companySlug);
+    
+    // Se retornou needs_verification ou não conectado, faz verificação completa
+    if (!quickStatus.connected) {
+      console.log(`⚠️ Quick check retornou não conectado para ${companySlug}, fazendo verificação completa...`);
+      
+      // Tenta verificação de saúde completa
+      if (whatsapp.verifyClientHealth) {
+        const healthCheck = await whatsapp.verifyClientHealth(companySlug);
+        
+        if (healthCheck.healthy) {
+          console.log(`✅ Verificação de saúde confirmou que ${companySlug} está conectado`);
+          quickStatus = { connected: true };
+        } else {
+          console.log(`❌ Verificação de saúde falhou para ${companySlug}:`, healthCheck.reason);
+        }
+      }
+    }
     
     if (!quickStatus.connected) {
       let errorMessage = `Empresa ${companySlug} não está conectada ao WhatsApp`;
       let suggestion = `Conecte a empresa primeiro acessando: /status/${companySlug}`;
-      
-      if (quickStatus.status === 'needs_verification') {
-        errorMessage = `Empresa ${companySlug} precisa de verificação de conexão`;
-        suggestion = quickStatus.suggestion || suggestion;
-      }
       
       console.error(errorMessage);
       
