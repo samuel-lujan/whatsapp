@@ -557,11 +557,23 @@ async function validateWhatsAppNumber(client, number) {
     }
   }
   
-  console.log(`⚠️ Nenhuma variação válida encontrada para ${cleanNumber}`);
+  // FALLBACK: Se getNumberId() falhou mas o formato está correto, tenta enviar mesmo assim
+  // Isso resolve o problema conhecido do whatsapp-web.js onde getNumberId() retorna null para números válidos
+  console.log(`⚠️ getNumberId() falhou para todas as variações, usando fallback...`);
+
+  // Usa a primeira variação (número original formatado) como fallback
+  const fallbackNumber = variations[0];
+  const fallbackChatId = `${fallbackNumber}@c.us`;
+
+  console.log(`🔄 Fallback: usando ${fallbackChatId} (formato válido, não confirmado pela API)`);
+
   return {
-    isValid: false,
+    isValid: true,
+    numberId: fallbackChatId,
     originalNumber: number,
-    numberId: null
+    validatedNumber: fallbackNumber,
+    wasAlternative: false,
+    wasFallback: true  // Flag para indicar que foi usado fallback
   };
 }
 
@@ -603,7 +615,12 @@ async function sendMessage(companySlug, number, message) {
     }
     
     const chatId = validation.numberId;
-    console.log(`✅ Número validado: ${chatId}${validation.wasAlternative ? ' (versão alternativa)' : ''}`);
+    const validationInfo = validation.wasFallback
+      ? ' (fallback - não confirmado pela API)'
+      : validation.wasAlternative
+        ? ' (versão alternativa)'
+        : '';
+    console.log(`✅ Número validado: ${chatId}${validationInfo}`);
     
     // ENVIO DA MENSAGEM
     console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`);
