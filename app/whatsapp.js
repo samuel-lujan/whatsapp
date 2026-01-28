@@ -1,28 +1,34 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { getAiResponse } = require("./langchain.js");
+
+const { Client, LocalAuth } = require("whatsapp-web.js");
 
 const sessions = {};
 
 async function getStatus(companySlug) {
   // PRIMEIRA VERIFICAÇÃO: Se já existe uma sessão conectada
   if (sessions[companySlug] && sessions[companySlug].ready) {
-    console.log(`✅ Cliente ${companySlug} já está conectado - não precisa de QR Code`);
+    console.log(
+      `✅ Cliente ${companySlug} já está conectado - não precisa de QR Code`
+    );
     return { connected: true };
   }
-  
+
   // SEGUNDA VERIFICAÇÃO: Se existe sessão mas não está marcada como ready, vamos testar diretamente
   if (sessions[companySlug] && sessions[companySlug].client) {
     console.log(`🔍 Verificando estado real do cliente ${companySlug}...`);
-    
+
     try {
       // Tenta uma operação que só funciona se estiver conectado
       const client = sessions[companySlug].client;
       const state = await Promise.race([
         client.getState(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 5000)
+        ),
       ]);
-      
+
       console.log(`📱 Estado atual do cliente ${companySlug}:`, state);
-      
+
       // Estados que indicam conexão ativa
       if (state === 'CONNECTED') {
         console.log(`🔧 Cliente ${companySlug} estava conectado mas não marcado como ready - corrigindo...`);
@@ -31,7 +37,7 @@ async function getStatus(companySlug) {
         sessions[companySlug].qrCode = null;
         return { connected: true };
       }
-      
+
       // Se o estado é null/undefined, tenta verificação alternativa
       if (state === null || state === undefined) {
         console.log(`🔍 Estado ambíguo para ${companySlug}, tentando verificação prática...`);
@@ -48,48 +54,65 @@ async function getStatus(companySlug) {
           console.log(`⚠️ Verificação alternativa falhou para ${companySlug}:`, e.message);
         }
       }
-      
+
     } catch (error) {
-      console.log(`⚠️ Cliente ${companySlug} não está realmente conectado:`, error.message);
+      console.log(
+        `⚠️ Cliente ${companySlug} não está realmente conectado:`,
+        error.message
+      );
       // Continua com o fluxo normal
     }
   }
-  
+
   // TERCEIRA VERIFICAÇÃO: Se está conectando
-  if (sessions[companySlug] && sessions[companySlug].connecting && !sessions[companySlug].ready) {
+  if (
+    sessions[companySlug] &&
+    sessions[companySlug].connecting &&
+    !sessions[companySlug].ready
+  ) {
     console.log(`⏳ Cliente ${companySlug} ainda está conectando...`);
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
     if (sessions[companySlug] && sessions[companySlug].ready) {
-      console.log(`✅ Cliente ${companySlug} finalizou conexão durante a espera`);
+      console.log(
+        `✅ Cliente ${companySlug} finalizou conexão durante a espera`
+      );
       return { connected: true };
     }
-    
+
     if (sessions[companySlug] && sessions[companySlug].qrCode) {
-      console.log(`📱 Cliente ${companySlug} ainda conectando - QR Code disponível`);
-      return { 
-        connected: false, 
+      console.log(
+        `📱 Cliente ${companySlug} ainda conectando - QR Code disponível`
+      );
+      return {
+        connected: false,
         qrCode: sessions[companySlug].qrCode,
-        status: 'connecting'
+        status: "connecting",
       };
     }
   }
 
   // QUARTA VERIFICAÇÃO: Só cria nova sessão se realmente não existe
   if (!sessions[companySlug]) {
-    console.log(`🆕 Nenhuma sessão encontrada para ${companySlug} - criando nova...`);
+    console.log(
+      `🆕 Nenhuma sessão encontrada para ${companySlug} - criando nova...`
+    );
     try {
       await createSession(companySlug);
-      
-      console.log(`⏳ Aguardando QR Code ou conexão automática para ${companySlug}...`);
+
+      console.log(
+        `⏳ Aguardando QR Code ou conexão automática para ${companySlug}...`
+      );
       await waitForQrCode(companySlug, 20000); // 20 segundos
-      
     } catch (error) {
-      console.log(`⚠️ Erro ao criar sessão/aguardar QR Code para ${companySlug}:`, error.message);
-      return { 
-        connected: false, 
+      console.log(
+        `⚠️ Erro ao criar sessão/aguardar QR Code para ${companySlug}:`,
+        error.message
+      );
+      return {
+        connected: false,
         error: error.message,
-        suggestion: "Tente novamente - o WhatsApp pode estar inicializando" 
+        suggestion: "Tente novamente - o WhatsApp pode estar inicializando",
       };
     }
   }
@@ -101,23 +124,34 @@ async function getStatus(companySlug) {
   }
 
   const qrCode = sessions[companySlug] ? sessions[companySlug].qrCode : null;
-  console.log(`📱 Retornando status para ${companySlug} - QR Code: ${qrCode ? 'Disponível' : 'Não disponível'}`);
+  console.log(
+    `📱 Retornando status para ${companySlug} - QR Code: ${
+      qrCode ? "Disponível" : "Não disponível"
+    }`
+  );
   console.log(`🔍 Estado da sessão ${companySlug}:`, {
     exists: !!sessions[companySlug],
     ready: sessions[companySlug] ? sessions[companySlug].ready : false,
-    connecting: sessions[companySlug] ? sessions[companySlug].connecting : false,
-    hasQrCode: !!qrCode
+    connecting: sessions[companySlug]
+      ? sessions[companySlug].connecting
+      : false,
+    hasQrCode: !!qrCode,
   });
-  
-  return { 
-    connected: false, 
+
+  return {
+    connected: false,
     qrCode: qrCode,
-    message: qrCode ? "Escaneie o QR Code para conectar" : "Aguardando QR Code..."
+    message: qrCode
+      ? "Escaneie o QR Code para conectar"
+      : "Aguardando QR Code...",
   };
 }
 
 function hasActiveSession(companySlug) {
-  return sessions[companySlug] && (sessions[companySlug].ready || sessions[companySlug].connecting);
+  return (
+    sessions[companySlug] &&
+    (sessions[companySlug].ready || sessions[companySlug].connecting)
+  );
 }
 
 function checkConnectionStatus(companySlug) {
@@ -126,40 +160,55 @@ function checkConnectionStatus(companySlug) {
     console.log(`✅ Verificação rápida: Cliente ${companySlug} está pronto`);
     return { connected: true };
   }
-  
+
   // Se existe sessão mas não está marcada como ready, vamos investigar
   if (sessions[companySlug] && sessions[companySlug].client) {
-    console.log(`🔍 Verificação rápida: Cliente ${companySlug} existe mas não está marcado como ready`);
-    
+    console.log(
+      `🔍 Verificação rápida: Cliente ${companySlug} existe mas não está marcado como ready`
+    );
+
     // Tenta uma verificação síncrona básica
     try {
       const client = sessions[companySlug].client;
       // Se o cliente tem pupPage e não está fechado, pode estar conectado
       if (client.pupPage && !client.pupPage.isClosed()) {
-        console.log(`🤔 Cliente ${companySlug} pode estar conectado - recomendado verificação completa`);
-        return { connected: false, status: 'needs_verification', suggestion: 'Use /status para verificação completa' };
+        console.log(
+          `🤔 Cliente ${companySlug} pode estar conectado - recomendado verificação completa`
+        );
+        return {
+          connected: false,
+          status: "needs_verification",
+          suggestion: "Use /status para verificação completa",
+        };
       }
     } catch (e) {
-      console.log(`⚠️ Erro na verificação rápida do cliente ${companySlug}:`, e.message);
+      console.log(
+        `⚠️ Erro na verificação rápida do cliente ${companySlug}:`,
+        e.message
+      );
     }
   }
-  
+
   if (sessions[companySlug] && sessions[companySlug].connecting) {
-    console.log(`⏳ Verificação rápida: Cliente ${companySlug} ainda conectando`);
-    return { connected: false, status: 'connecting' };
+    console.log(
+      `⏳ Verificação rápida: Cliente ${companySlug} ainda conectando`
+    );
+    return { connected: false, status: "connecting" };
   }
-  
+
   console.log(`❌ Verificação rápida: Cliente ${companySlug} não conectado`);
   return { connected: false };
 }
 
 async function createSession(companySlug) {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const isHeadless = isProduction || process.env.HEADLESS === 'true';
-  
-  console.log(`🖥️ Ambiente: ${isProduction ? 'PRODUÇÃO' : 'DESENVOLVIMENTO'}`);
-  console.log(`🌐 Browser: ${isHeadless ? 'HEADLESS (sem interface)' : 'COM INTERFACE'}`);
-  
+  const isProduction = process.env.NODE_ENV === "production";
+  const isHeadless = isProduction || process.env.HEADLESS === "true";
+
+  console.log(`🖥️ Ambiente: ${isProduction ? "PRODUÇÃO" : "DESENVOLVIMENTO"}`);
+  console.log(
+    `🌐 Browser: ${isHeadless ? "HEADLESS (sem interface)" : "COM INTERFACE"}`
+  );
+
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: companySlug }),
     puppeteer: {
@@ -183,51 +232,58 @@ async function createSession(companySlug) {
     }
   });
 
-  sessions[companySlug] = { 
-    client, 
-    qrCode: null, 
+  sessions[companySlug] = {
+    client,
+    qrCode: null,
     ready: false,
-    connecting: false
+    connecting: false,
   };
 
-  client.on('qr', (qr) => {
+  client.on("qr", (qr) => {
     console.log(`QR Code gerado para empresa: ${companySlug}`);
     sessions[companySlug].qrCode = qr;
   });
 
-  client.on('authenticated', (session) => {
+  client.on("authenticated", (session) => {
     console.log(`🔐 Cliente ${companySlug} autenticado - sessão salva`);
     if (sessions[companySlug]) {
       sessions[companySlug].connecting = false; // Já foi autenticado
     }
   });
 
-  client.on('ready', async () => {
+  client.on("ready", async () => {
     console.log(`✅ WhatsApp conectado para empresa: ${companySlug}`);
     if (sessions[companySlug]) {
       sessions[companySlug].ready = true;
       sessions[companySlug].connecting = false;
       sessions[companySlug].qrCode = null; // Limpa QR Code após conexão
-      
+
       // Tenta obter info do cliente para confirmar conexão
       try {
         const info = await client.info;
-        console.log(`📱 Cliente ${companySlug} conectado como: ${info.wid._serialized}`);
+        console.log(
+          `📱 Cliente ${companySlug} conectado como: ${info.wid._serialized}`
+        );
       } catch (e) {
-        console.log(`⚠️ Cliente ${companySlug} conectado mas sem info detalhada`);
+        console.log(
+          `⚠️ Cliente ${companySlug} conectado mas sem info detalhada`
+        );
       }
     }
   });
 
-  client.on('disconnected', (reason) => {
-    console.log(`❌ WhatsApp desconectado para empresa ${companySlug}:`, reason);
+  client.on("disconnected", (reason) => {
+    console.log(
+      `❌ WhatsApp desconectado para empresa ${companySlug}:`,
+      reason
+    );
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
       sessions[companySlug].qrCode = null;
     }
   });
 
-  client.on('auth_failure', (msg) => {
+  client.on("auth_failure", (msg) => {
     console.log(`🚫 Falha de autenticação para empresa ${companySlug}:`, msg);
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
@@ -235,9 +291,13 @@ async function createSession(companySlug) {
     }
   });
 
-  client.on('change_state', (state) => {
+  client.on("change_state", (state) => {
     console.log(`🔄 Estado alterado para empresa ${companySlug}:`, state);
-    if (state === 'DISCONNECTED' || state === 'UNPAIRED' || state === 'UNLAUNCHED') {
+    if (
+      state === "DISCONNECTED" ||
+      state === "UNPAIRED" ||
+      state === "UNLAUNCHED"
+    ) {
       if (sessions[companySlug]) {
         sessions[companySlug].ready = false;
         sessions[companySlug].connecting = false;
@@ -247,7 +307,7 @@ async function createSession(companySlug) {
   });
 
   // Captura erros do puppeteer/chrome
-  client.on('error', (error) => {
+  client.on("error", (error) => {
     console.log(`❌ Erro no cliente ${companySlug}:`, error.message);
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
@@ -257,10 +317,44 @@ async function createSession(companySlug) {
   });
 
   // Monitora se a página foi fechada/perdida
-  client.on('change_battery', (batteryInfo) => {
+  client.on("change_battery", (batteryInfo) => {
     // Este evento para de disparar quando desconecta
     if (sessions[companySlug]) {
       sessions[companySlug].lastBatteryUpdate = Date.now();
+    }
+  });
+
+  client.on("message", async (message) => {
+    try {
+      console.log(`📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`);
+
+      const chat = await message.getChat();
+      const aiResponse = await getAiResponse(message, chat, companySlug);
+
+      if (aiResponse.success) {
+        await Promise.race([
+          client.sendMessage(message.from, aiResponse.body),
+          new Promise((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Timeout ao enviar mensagem - cliente pode ter desconectado"
+                  )
+                ),
+              15000
+            )
+          ),
+        ]);
+
+        console.log(
+          `✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`
+        );
+      } else {
+        await chat.markUnread();
+      }
+    } catch (error) {
+      console.error(`❌ Erro ao processar mensagem para ${companySlug}:`, error.message);
     }
   });
 
@@ -272,23 +366,38 @@ async function createSession(companySlug) {
 async function waitForQrCode(companySlug, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
-      console.log(`⏰ Timeout ao aguardar QR Code para ${companySlug} após ${timeout/1000}s`);
-      reject(new Error(`Timeout ao gerar QR Code para ${companySlug}. Tente novamente.`));
+      console.log(
+        `⏰ Timeout ao aguardar QR Code para ${companySlug} após ${
+          timeout / 1000
+        }s`
+      );
+      reject(
+        new Error(
+          `Timeout ao gerar QR Code para ${companySlug}. Tente novamente.`
+        )
+      );
     }, timeout);
 
     const interval = setInterval(() => {
-      if (sessions[companySlug] && (sessions[companySlug].qrCode || sessions[companySlug].ready)) {
+      if (
+        sessions[companySlug] &&
+        (sessions[companySlug].qrCode || sessions[companySlug].ready)
+      ) {
         clearTimeout(timeoutId);
         clearInterval(interval);
-        console.log(`✅ QR Code gerado ou cliente conectado para ${companySlug}`);
+        console.log(
+          `✅ QR Code gerado ou cliente conectado para ${companySlug}`
+        );
         resolve();
       }
-      
+
       // Verifica se a sessão foi perdida/removida
       if (!sessions[companySlug]) {
         clearTimeout(timeoutId);
         clearInterval(interval);
-        reject(new Error(`Sessão ${companySlug} foi removida durante a espera`));
+        reject(
+          new Error(`Sessão ${companySlug} foi removida durante a espera`)
+        );
       }
     }, 1000); // Verifica a cada 1 segundo ao invés de 500ms
   });
@@ -297,11 +406,11 @@ async function waitForQrCode(companySlug, timeout = 30000) {
 // Função para verificar se o cliente está realmente funcional
 async function verifyClientHealth(companySlug) {
   if (!sessions[companySlug] || !sessions[companySlug].client) {
-    return { healthy: false, reason: 'Sessão não existe' };
+    return { healthy: false, reason: "Sessão não existe" };
   }
-  
+
   const client = sessions[companySlug].client;
-  
+
   try {
     // Primeiro verifica se a página do puppeteer ainda está ativa
     if (client.pupPage) {
@@ -327,34 +436,31 @@ async function verifyClientHealth(companySlug) {
     } catch (e) {
       console.log(`⚠️ Timeout ao obter estado do cliente ${companySlug}, tentando verificação alternativa...`);
     }
-    
-    // Estados aceitáveis - CONNECTED é o ideal, mas null/undefined pode ocorrer quando conectado
-    const acceptableStates = ['CONNECTED', null, undefined];
-    
+
     // Se o estado é CONNECTED, está saudável
     if (state === 'CONNECTED') {
       console.log(`✅ Cliente ${companySlug} está CONNECTED`);
       return { healthy: true, state, info: 'N/A' };
     }
-    
+
     // Se o estado é explicitamente desconectado, não está saudável
     const disconnectedStates = ['CONFLICT', 'UNPAIRED', 'UNLAUNCHED', 'PROXYBLOCK', 'TOS_BLOCK', 'SMB_TOS_BLOCK'];
     if (disconnectedStates.includes(state)) {
       console.log(`❌ Cliente ${companySlug} está em estado de desconexão: ${state}`);
       return { healthy: false, reason: `Estado de desconexão: ${state}`, shouldReconnect: true };
     }
-    
-    // Para outros estados (null, undefined, OPENING, PAIRING, etc.), 
+
+    // Para outros estados (null, undefined, OPENING, PAIRING, etc.),
     // tenta uma verificação prática: obter info do cliente
     console.log(`🔍 Estado ambíguo (${state}), tentando verificação prática para ${companySlug}...`);
-    
+
     try {
       // Tenta obter informações básicas do cliente - isso só funciona se conectado
       const info = await Promise.race([
         Promise.resolve(client.info),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-info')), 3000))
       ]);
-      
+
       if (info && info.wid) {
         console.log(`✅ Cliente ${companySlug} tem info válida: ${info.wid._serialized}`);
         return { healthy: true, state: state || 'ASSUMED_CONNECTED', info: info.wid._serialized };
@@ -362,7 +468,7 @@ async function verifyClientHealth(companySlug) {
     } catch (e) {
       console.log(`⚠️ Não conseguiu obter info do cliente ${companySlug}: ${e.message}`);
     }
-    
+
     // Última tentativa: verificar se consegue listar chats (operação leve)
     try {
       console.log(`🔍 Tentativa final: listando chats para ${companySlug}...`);
@@ -370,7 +476,7 @@ async function verifyClientHealth(companySlug) {
         client.getChats(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout-chats')), 5000))
       ]);
-      
+
       if (chats && Array.isArray(chats)) {
         console.log(`✅ Cliente ${companySlug} conseguiu listar ${chats.length} chats - está funcional`);
         return { healthy: true, state: state || 'FUNCTIONAL', info: `${chats.length} chats` };
@@ -378,79 +484,93 @@ async function verifyClientHealth(companySlug) {
     } catch (e) {
       console.log(`❌ Cliente ${companySlug} não conseguiu listar chats: ${e.message}`);
     }
-    
+
     // Se chegou aqui, não está saudável
     console.log(`❌ Cliente ${companySlug} falhou em todas as verificações de saúde`);
-    return { 
-      healthy: false, 
+    return {
+      healthy: false,
       reason: `Estado: ${state || 'desconhecido'} - falhou nas verificações práticas`,
-      shouldReconnect: true 
+      shouldReconnect: true
     };
-    
   } catch (error) {
-    console.log(`❌ Cliente ${companySlug} falhou na verificação de saúde:`, error.message);
-    return { 
-      healthy: false, 
+    console.log(
+      `❌ Cliente ${companySlug} falhou na verificação de saúde:`,
+      error.message
+    );
+    return {
+      healthy: false,
       reason: error.message,
-      shouldReconnect: true 
+      shouldReconnect: true,
     };
   }
 }
 
 // Função para encontrar o chat correto para um número
 async function findCorrectChatId(client, number) {
-  const cleanNumber = number.replace(/\D/g, '');
+  const cleanNumber = number.replace(/\D/g, "");
   const possibleChatIds = [
     `${cleanNumber}@c.us`,
-    `${cleanNumber}@s.whatsapp.net`
+    `${cleanNumber}@s.whatsapp.net`,
   ];
-  
+
   console.log(`🔍 Procurando chat existente para número: ${cleanNumber}`);
-  
+
   try {
     // PRIMEIRA TENTATIVA: Buscar por chats existentes
     const chats = await client.getChats();
-    
+
     for (const chat of chats) {
       const chatNumber = chat.id.user;
       if (chatNumber === cleanNumber) {
-        console.log(`✅ Encontrou chat existente: ${chat.id._serialized} (nome: ${chat.name})`);
+        console.log(
+          `✅ Encontrou chat existente: ${chat.id._serialized} (nome: ${chat.name})`
+        );
         return {
           chatId: chat.id._serialized,
           isExistingChat: true,
           chatName: chat.name,
-          isGroup: chat.isGroup
+          isGroup: chat.isGroup,
         };
       }
     }
-    
+
     // SEGUNDA TENTATIVA: Verificar se é um contato salvo
-    console.log(`🔍 Não encontrou chat existente, verificando contatos salvos...`);
+    console.log(
+      `🔍 Não encontrou chat existente, verificando contatos salvos...`
+    );
     const contacts = await client.getContacts();
-    
+
     for (const contact of contacts) {
       const contactNumber = contact.id.user;
       if (contactNumber === cleanNumber) {
-        console.log(`✅ Encontrou contato salvo: ${contact.id._serialized} (nome: ${contact.name || contact.pushname})`);
+        console.log(
+          `✅ Encontrou contato salvo: ${contact.id._serialized} (nome: ${
+            contact.name || contact.pushname
+          })`
+        );
         return {
           chatId: contact.id._serialized,
           isExistingChat: false,
           contactName: contact.name || contact.pushname,
-          isContact: true
+          isContact: true,
         };
       }
     }
-    
+
     // TERCEIRA TENTATIVA: Verificar se o número está registrado no WhatsApp
-    console.log(`🔍 Verificando se número ${cleanNumber} está registrado no WhatsApp...`);
+    console.log(
+      `🔍 Verificando se número ${cleanNumber} está registrado no WhatsApp...`
+    );
     const isRegistered = await client.isRegisteredUser(`${cleanNumber}@c.us`);
-    
+
     if (isRegistered) {
-      console.log(`✅ Número ${cleanNumber} está registrado, usando formato padrão`);
+      console.log(
+        `✅ Número ${cleanNumber} está registrado, usando formato padrão`
+      );
       return {
         chatId: `${cleanNumber}@c.us`,
         isExistingChat: false,
-        isRegistered: true
+        isRegistered: true,
       };
     } else {
       console.log(`⚠️ Número ${cleanNumber} não está registrado no WhatsApp`);
@@ -459,34 +579,38 @@ async function findCorrectChatId(client, number) {
         chatId: `${cleanNumber}@c.us`,
         isExistingChat: false,
         isRegistered: false,
-        warning: 'Número pode não estar registrado no WhatsApp'
+        warning: "Número pode não estar registrado no WhatsApp",
       };
     }
-    
   } catch (error) {
-    console.log(`⚠️ Erro ao buscar chat/contato, usando formato padrão:`, error.message);
+    console.log(
+      `⚠️ Erro ao buscar chat/contato, usando formato padrão:`,
+      error.message
+    );
     return {
       chatId: `${cleanNumber}@c.us`,
       isExistingChat: false,
-      error: error.message
+      error: error.message,
     };
   }
 }
 
 async function validateWhatsAppNumber(client, number) {
-  let cleanNumber = number.replace(/\D/g, '');
-  
-  console.log(`🔢 Número original limpo: ${cleanNumber} (${cleanNumber.length} dígitos)`);
-  
-  if (!cleanNumber.startsWith('55')) {
+  let cleanNumber = number.replace(/\D/g, "");
+
+  console.log(
+    `🔢 Número original limpo: ${cleanNumber} (${cleanNumber.length} dígitos)`
+  );
+
+  if (!cleanNumber.startsWith("55")) {
     // Se tem 11 dígitos (DDD + número), adiciona 55
     if (cleanNumber.length === 11) {
-      cleanNumber = '55' + cleanNumber;
+      cleanNumber = "55" + cleanNumber;
       console.log(`➕ Adicionado código 55 (11 dígitos): ${cleanNumber}`);
     }
     // Se tem 10 dígitos (DDD + número sem 9), adiciona 55
     else if (cleanNumber.length === 10) {
-      cleanNumber = '55' + cleanNumber;
+      cleanNumber = "55" + cleanNumber;
       console.log(`➕ Adicionado código 55 (10 dígitos): ${cleanNumber}`);
     }
     // Se tem menos de 10 dígitos, é inválido
@@ -496,52 +620,57 @@ async function validateWhatsAppNumber(client, number) {
         isValid: false,
         originalNumber: number,
         numberId: null,
-        error: `Número muito curto: ${cleanNumber.length} dígitos (mínimo 10)`
+        error: `Número muito curto: ${cleanNumber.length} dígitos (mínimo 10)`,
       };
     }
     // Se tem mais de 11 mas não começa com 55, pode ser erro
     else {
-      console.log(`⚠️ Número com formato inesperado: ${cleanNumber.length} dígitos sem código 55`);
+      console.log(
+        `⚠️ Número com formato inesperado: ${cleanNumber.length} dígitos sem código 55`
+      );
     }
   }
-  
+
   // Validação de formato básico
   if (cleanNumber.length < 12 || cleanNumber.length > 13) {
-    console.log(`⚠️ Número com formato inválido: ${cleanNumber.length} dígitos (esperado 12 ou 13)`);
+    console.log(
+      `⚠️ Número com formato inválido: ${cleanNumber.length} dígitos (esperado 12 ou 13)`
+    );
     return {
       isValid: false,
       originalNumber: number,
       numberId: null,
-      error: `Número com formato inválido: ${cleanNumber.length} dígitos`
+      error: `Número com formato inválido: ${cleanNumber.length} dígitos`,
     };
   }
-  
+
   console.log(`🔍 Validando número: ${cleanNumber}`);
-  
+
   // Lista de variações para testar
   const variations = [cleanNumber];
-  
+
   // Se tem 13 dígitos e o 5º caractere (índice 4) é '9', adiciona versão sem o 9
-  if (cleanNumber.length === 13 && cleanNumber.charAt(4) === '9') {
+  if (cleanNumber.length === 13 && cleanNumber.charAt(4) === "9") {
     const withoutNine = cleanNumber.substring(0, 4) + cleanNumber.substring(5);
     variations.push(withoutNine);
     console.log(`📋 Testando variações: [${cleanNumber}, ${withoutNine}]`);
-  } 
+  }
   // Se tem 12 dígitos e o 5º caractere NÃO é '9', adiciona versão COM o 9
-  else if (cleanNumber.length === 12 && cleanNumber.charAt(4) !== '9') {
-    const withNine = cleanNumber.substring(0, 4) + '9' + cleanNumber.substring(4);
+  else if (cleanNumber.length === 12 && cleanNumber.charAt(4) !== "9") {
+    const withNine =
+      cleanNumber.substring(0, 4) + "9" + cleanNumber.substring(4);
     variations.push(withNine);
     console.log(`📋 Testando variações: [${cleanNumber}, ${withNine}]`);
   } else {
     console.log(`📋 Testando apenas: [${cleanNumber}]`);
   }
-  
+
   // Testa cada variação usando getNumberId (muito mais rápido e confiável)
   for (const variation of variations) {
     try {
       console.log(`🔎 Testando: ${variation}`);
       const numberId = await client.getNumberId(variation);
-      
+
       if (numberId) {
         console.log(`✅ Número válido encontrado: ${numberId._serialized}`);
         return {
@@ -549,14 +678,14 @@ async function validateWhatsAppNumber(client, number) {
           numberId: numberId._serialized,
           originalNumber: number,
           validatedNumber: variation,
-          wasAlternative: variation !== cleanNumber
+          wasAlternative: variation !== cleanNumber,
         };
       }
     } catch (error) {
       console.log(`❌ Erro ao testar ${variation}: ${error.message}`);
     }
   }
-  
+
   // FALLBACK: Se getNumberId() falhou mas o formato está correto, tenta enviar mesmo assim
   // Isso resolve o problema conhecido do whatsapp-web.js onde getNumberId() retorna null para números válidos
   console.log(`⚠️ getNumberId() falhou para todas as variações, usando fallback...`);
@@ -586,34 +715,43 @@ async function sendMessage(companySlug, number, message) {
   }
 
   // Verifica a saúde do cliente antes de enviar
-  console.log(`🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`);
+  console.log(
+    `🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`
+  );
   const healthCheck = await verifyClientHealth(companySlug);
-  
+
   if (!healthCheck.healthy) {
-    console.log(`⚠️ Cliente ${companySlug} não está saudável:`, healthCheck.reason);
-    
+    console.log(
+      `⚠️ Cliente ${companySlug} não está saudável:`,
+      healthCheck.reason
+    );
+
     // Marca como não conectado para forçar reconexão
     sessions[companySlug].ready = false;
-    
+
     if (healthCheck.shouldReconnect) {
-      throw new Error(`Cliente ${companySlug} perdeu conexão. Erro: ${healthCheck.reason}. Acesse /status/${companySlug} para reconectar.`);
+      throw new Error(
+        `Cliente ${companySlug} perdeu conexão. Erro: ${healthCheck.reason}. Acesse /status/${companySlug} para reconectar.`
+      );
     } else {
-      throw new Error(`Cliente ${companySlug} não está funcional: ${healthCheck.reason}`);
+      throw new Error(
+        `Cliente ${companySlug} não está funcional: ${healthCheck.reason}`
+      );
     }
   }
 
   try {
     const client = sessions[companySlug].client;
-    
+
     // VALIDAÇÃO DO NÚMERO: Usa getNumberId() para validar
     console.log(`🔍 Validando número ${number}...`);
     const validation = await validateWhatsAppNumber(client, number);
-    
+
     if (!validation.isValid) {
       console.log(`❌ Número ${number} não é válido no WhatsApp`);
       throw new Error(`Número ${number} não é um usuário válido do WhatsApp`);
     }
-    
+
     const chatId = validation.numberId;
     const validationInfo = validation.wasFallback
       ? ' (fallback - não confirmado pela API)'
@@ -621,34 +759,38 @@ async function sendMessage(companySlug, number, message) {
         ? ' (versão alternativa)'
         : '';
     console.log(`✅ Número validado: ${chatId}${validationInfo}`);
-    
+
     // ENVIO DA MENSAGEM
-    console.log(`📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`);
+    console.log(
+      `📤 Enviando mensagem do cliente ${companySlug} para ${chatId}`
+    );
     await client.sendMessage(chatId, message);
     console.log(`✅ Mensagem enviada com sucesso!`);
-    
+
     // Busca informações do contato (opcional, para logs/retorno)
     let contactInfo = {
-      pushname: 'Desconhecido',
-      chatName: chatId
+      pushname: "Desconhecido",
+      chatName: chatId,
     };
-    
+
     try {
       const chat = await client.getChatById(chatId);
       const contact = await chat.getContact();
       contactInfo = {
-        pushname: contact.pushname || 'Sem nome',
+        pushname: contact.pushname || "Sem nome",
         chatName: chat.name || chatId,
-        isMyContact: contact.isMyContact
+        isMyContact: contact.isMyContact,
       };
       console.log(`👤 Informações do contato: ${contactInfo.pushname}`);
     } catch (e) {
-      console.log(`⚠️ Não foi possível obter informações do contato: ${e.message}`);
+      console.log(
+        `⚠️ Não foi possível obter informações do contato: ${e.message}`
+      );
     }
-    
+
     return {
       success: true,
-      message: 'Mensagem enviada com sucesso',
+      message: "Mensagem enviada com sucesso",
       data: {
         companySlug,
         number: chatId,
@@ -658,34 +800,40 @@ async function sendMessage(companySlug, number, message) {
         chatName: contactInfo.chatName,
         userPushname: contactInfo.pushname,
         content: message,
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
     };
-    
   } catch (error) {
     console.error(`❌ Erro ao enviar mensagem pelo cliente ${companySlug}:`, error.message);
 
     // Se é erro 400 (número não válido), não marca como desconectado
-    if (error.statusCode === 400 || error.message.includes('não é um usuário válido')) {
+    if (
+      error.statusCode === 400 ||
+      error.message.includes("não é um usuário válido")
+    ) {
       throw error;
     }
 
     // IMPORTANTE: Erros internos da biblioteca whatsapp-web.js que NÃO indicam desconexão
     // Esses erros podem ocorrer mesmo com conexão ativa e geralmente são temporários
     const knownLibraryBugs = [
-      'markedUnread',      // Bug conhecido da biblioteca
-      'isNewMsg',          // Bug similar
-      'Cannot read properties of undefined'  // Erro genérico da biblioteca que não indica desconexão
+      "markedUnread", // Bug conhecido da biblioteca
+      "isNewMsg", // Bug similar
+      "Cannot read properties of undefined", // Erro genérico da biblioteca que não indica desconexão
     ];
 
-    const isKnownLibraryBug = knownLibraryBugs.some(bug => error.message.includes(bug));
+    const isKnownLibraryBug = knownLibraryBugs.some((bug) =>
+      error.message.includes(bug)
+    );
 
     if (isKnownLibraryBug) {
-      console.log(`⚠️ Erro interno da biblioteca whatsapp-web.js (não é desconexão): ${error.message}`);
+      console.log(
+        `⚠️ Erro interno da biblioteca whatsapp-web.js (não é desconexão): ${error.message}`
+      );
       console.log(`🔄 Tentando enviar novamente em 1 segundo...`);
 
       // Aguarda 1 segundo e tenta novamente
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       try {
         const client = sessions[companySlug].client;
@@ -698,15 +846,15 @@ async function sendMessage(companySlug, number, message) {
 
           return {
             success: true,
-            message: 'Mensagem enviada com sucesso (após retry)',
+            message: "Mensagem enviada com sucesso (após retry)",
             data: {
               companySlug,
               number: validation.numberId,
               originalNumber: number,
               content: message,
               timestamp: new Date().toISOString(),
-              wasRetry: true
-            }
+              wasRetry: true,
+            },
           };
         }
       } catch (retryError) {
@@ -721,12 +869,20 @@ async function sendMessage(companySlug, number, message) {
     // Se houve erro de conexão real, marca como não conectado
     if (sessions[companySlug]) {
       sessions[companySlug].ready = false;
-      console.log(`🔄 Marcando cliente ${companySlug} como não conectado devido a erro no envio`);
+      console.log(
+        `🔄 Marcando cliente ${companySlug} como não conectado devido a erro no envio`
+      );
     }
 
     // Erros que realmente indicam perda de conexão
-    if (error.message.includes('getChat') || error.message.includes('perdeu conexão') || error.message.includes('Protocol error')) {
-      throw new Error(`Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`);
+    if (
+      error.message.includes("getChat") ||
+      error.message.includes("perdeu conexão") ||
+      error.message.includes("Protocol error")
+    ) {
+      throw new Error(
+        `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`
+      );
     }
 
     throw new Error(`Erro ao enviar mensagem: ${error.message}`);
@@ -744,13 +900,13 @@ function getClient(companySlug) {
 async function clearSession(companySlug) {
   if (!sessions[companySlug]) {
     console.log(`⚠️ Sessão ${companySlug} não existe`);
-    return { success: false, message: 'Sessão não existe' };
+    return { success: false, message: "Sessão não existe" };
   }
 
   const client = sessions[companySlug].client;
   let logoutSuccess = false;
   let destroySuccess = false;
-  
+
   console.log(`🧹 Iniciando limpeza completa da sessão ${companySlug}...`);
 
   // PRIMEIRO: Tenta fazer logout do WhatsApp (desconecta do celular)
@@ -759,9 +915,9 @@ async function clearSession(companySlug) {
       console.log(`📱 Fazendo logout do WhatsApp para ${companySlug}...`);
       await Promise.race([
         client.logout(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout no logout')), 10000)
-        )
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout no logout")), 10000)
+        ),
       ]);
       logoutSuccess = true;
       console.log(`✅ Logout realizado com sucesso para ${companySlug}`);
@@ -792,15 +948,15 @@ async function clearSession(companySlug) {
     details: {
       logoutSuccess,
       destroySuccess,
-      sessionRemoved: true
-    }
+      sessionRemoved: true,
+    },
   };
 
   if (logoutSuccess) {
-    result.message += ' e logout realizado no WhatsApp';
+    result.message += " e logout realizado no WhatsApp";
     result.whatsappLoggedOut = true;
   } else {
-    result.message += ' (logout do WhatsApp pode ter falhado)';
+    result.message += " (logout do WhatsApp pode ter falhado)";
     result.whatsappLoggedOut = false;
   }
 
@@ -810,9 +966,9 @@ async function clearSession(companySlug) {
 // Função para debug - força verificação do estado real
 async function debugSessionState(companySlug) {
   if (!sessions[companySlug]) {
-    return { exists: false, message: 'Sessão não existe' };
+    return { exists: false, message: "Sessão não existe" };
   }
-  
+
   const session = sessions[companySlug];
   const debug = {
     exists: true,
@@ -820,31 +976,32 @@ async function debugSessionState(companySlug) {
     connecting: session.connecting,
     hasQrCode: !!session.qrCode,
     hasClient: !!session.client,
-    lastBatteryUpdate: session.lastBatteryUpdate || null
+    lastBatteryUpdate: session.lastBatteryUpdate || null,
   };
-  
+
   if (session.client) {
     try {
       const state = await Promise.race([
         session.client.getState(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 3000)
+        ),
       ]);
       debug.realState = state;
-      debug.isReallyConnected = state === 'CONNECTED';
-      
-      if (state === 'CONNECTED' && !session.ready) {
+      debug.isReallyConnected = state === "CONNECTED";
+
+      if (state === "CONNECTED" && !session.ready) {
         console.log(`🔧 CORREÇÃO: Marcando ${companySlug} como conectado`);
         session.ready = true;
         session.connecting = false;
         session.qrCode = null;
       }
-      
     } catch (error) {
-      debug.realState = 'ERROR';
+      debug.realState = "ERROR";
       debug.error = error.message;
     }
   }
-  
+
   return debug;
 }
 
@@ -855,18 +1012,18 @@ async function searchNumberInfo(companySlug, number) {
   }
 
   const client = sessions[companySlug].client;
-  const cleanNumber = number.replace(/\D/g, '');
-  
+  const cleanNumber = number.replace(/\D/g, "");
+
   console.log(`🔍 Buscando informações completas para número: ${cleanNumber}`);
-  
+
   const info = {
     originalNumber: number,
     cleanNumber: cleanNumber,
     searchResults: {
       chats: [],
       contacts: [],
-      registrationStatus: null
-    }
+      registrationStatus: null,
+    },
   };
 
   try {
@@ -880,7 +1037,7 @@ async function searchNumberInfo(companySlug, number) {
           isGroup: chat.isGroup,
           isReadOnly: chat.isReadOnly,
           unreadCount: chat.unreadCount,
-          timestamp: chat.timestamp
+          timestamp: chat.timestamp,
         });
       }
     }
@@ -895,14 +1052,16 @@ async function searchNumberInfo(companySlug, number) {
           pushname: contact.pushname,
           isMyContact: contact.isMyContact,
           isUser: contact.isUser,
-          isWAContact: contact.isWAContact
+          isWAContact: contact.isWAContact,
         });
       }
     }
 
     // Verifica se está registrado
     try {
-      info.searchResults.registrationStatus = await client.isRegisteredUser(`${cleanNumber}@c.us`);
+      info.searchResults.registrationStatus = await client.isRegisteredUser(
+        `${cleanNumber}@c.us`
+      );
     } catch (e) {
       info.searchResults.registrationStatus = `Erro: ${e.message}`;
     }
@@ -925,7 +1084,7 @@ function listSessions() {
       ready: session.ready,
       connecting: session.connecting,
       hasQrCode: !!session.qrCode,
-      lastBatteryUpdate: session.lastBatteryUpdate || null
+      lastBatteryUpdate: session.lastBatteryUpdate || null,
     };
   }
   return sessionList;
@@ -1011,13 +1170,19 @@ async function deleteAllCompaniesAndSessions() {
 async function clearAllSessions() {
   const results = {}
   const sessionKeys = Object.keys(sessions);
-  
-  console.log(`🧹 Iniciando limpeza de todas as sessões (${sessionKeys.length} sessões)`);
-  
+
+  console.log(
+    `🧹 Iniciando limpeza de todas as sessões (${sessionKeys.length} sessões)`
+  );
+
   if (sessionKeys.length === 0) {
-    return { success: true, message: 'Nenhuma sessão ativa para limpar', sessions: {} };
+    return {
+      success: true,
+      message: "Nenhuma sessão ativa para limpar",
+      sessions: {},
+    };
   }
-  
+
   // Processa todas as sessões em paralelo
   const promises = sessionKeys.map(async (companySlug) => {
     try {
@@ -1027,18 +1192,22 @@ async function clearAllSessions() {
       results[companySlug] = {
         success: false,
         message: `Erro ao limpar sessão: ${error.message}`,
-        error: error.message
+        error: error.message,
       };
     }
   });
-  
+
   await Promise.all(promises);
-  
-  const successCount = Object.values(results).filter(r => r.success).length;
-  const logoutCount = Object.values(results).filter(r => r.whatsappLoggedOut).length;
-  
-  console.log(`✅ Limpeza concluída: ${successCount}/${sessionKeys.length} sessões limpas, ${logoutCount} com logout do WhatsApp`);
-  
+
+  const successCount = Object.values(results).filter((r) => r.success).length;
+  const logoutCount = Object.values(results).filter(
+    (r) => r.whatsappLoggedOut
+  ).length;
+
+  console.log(
+    `✅ Limpeza concluída: ${successCount}/${sessionKeys.length} sessões limpas, ${logoutCount} com logout do WhatsApp`
+  );
+
   return {
     success: true,
     message: `Processadas ${sessionKeys.length} sessões`,
@@ -1046,23 +1215,23 @@ async function clearAllSessions() {
       total: sessionKeys.length,
       successful: successCount,
       withLogout: logoutCount,
-      failed: sessionKeys.length - successCount
+      failed: sessionKeys.length - successCount,
     },
-    sessions: results
+    sessions: results,
   };
 }
 
-module.exports = { 
-  getStatus, 
+module.exports = {
+  getStatus,
   checkConnectionStatus,
   hasActiveSession,
   verifyClientHealth,
   debugSessionState,
-  sendMessage, 
+  sendMessage,
   getClient,
   clearSession,
   clearAllSessions,
   deleteAllCompaniesAndSessions,
   listSessions,
-  searchNumberInfo
+  searchNumberInfo,
 };
