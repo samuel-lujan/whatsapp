@@ -325,30 +325,36 @@ async function createSession(companySlug) {
   });
 
   client.on("message", async (message) => {
-    const chat = await message.getChat();
-    const aiResponse = await getAiResponse(message, chat, companySlug);
+    try {
+      console.log(`📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`);
 
-    if (aiResponse.success) {
-      await Promise.race([
-        client.sendMessage(message.from, aiResponse.body), // aqui
-        new Promise((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  "Timeout ao enviar mensagem - cliente pode ter desconectado"
-                )
-              ),
-            15000
-          )
-        ),
-      ]);
+      const chat = await message.getChat();
+      const aiResponse = await getAiResponse(message, chat, companySlug);
 
-      console.log(
-        `✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`
-      );
-    } else {
-      await chat.markUnread(); // Marca como não lida se não for texto ou for grupo
+      if (aiResponse.success) {
+        await Promise.race([
+          client.sendMessage(message.from, aiResponse.body),
+          new Promise((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Timeout ao enviar mensagem - cliente pode ter desconectado"
+                  )
+                ),
+              15000
+            )
+          ),
+        ]);
+
+        console.log(
+          `✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`
+        );
+      } else {
+        await chat.markUnread();
+      }
+    } catch (error) {
+      console.error(`❌ Erro ao processar mensagem para ${companySlug}:`, error.message);
     }
   });
 
