@@ -175,11 +175,32 @@ function prepareInput(message, token, name) {
   };
 }
 
+async function getRealPhoneNumber(message) {
+  // Se for LID, precisamos obter o número real do contato
+  if (message.from.endsWith("@lid")) {
+    try {
+      const contact = await message.getContact();
+      // contact.number contém o número real (ex: "5511999999999")
+      if (contact.number) {
+        console.log(`📱 LID detectado. Número real: ${contact.number}`);
+        return contact.number;
+      }
+    } catch (e) {
+      console.error("Erro ao obter contato do LID:", e.message);
+    }
+  }
+  // Se não for LID ou não conseguir obter, usa o from original
+  return message.from;
+}
+
 export async function getAiResponse(message, chat, companySlug) {
   if (message.type === "chat" && !chat.isGroup) {
+    // Obtém o número real para autenticação (resolve LIDs)
+    const realPhoneNumber = await getRealPhoneNumber(message);
+
     const session = await getSession(
       companySlug,
-      message.from,
+      realPhoneNumber,
       message.to,
       message.timestamp
     );
