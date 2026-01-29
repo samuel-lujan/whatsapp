@@ -21,6 +21,8 @@ jobs:
         with:
           args: |
             cd /var/www/whatsapp
+            git add .
+            git reset --hard
             git pull origin master
             npm install
             pm2 restart all
