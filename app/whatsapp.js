@@ -351,7 +351,13 @@ async function createSession(companySlug) {
           `✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`
         );
       } else {
-        await chat.markUnread();
+        // Quando a IA não tem resposta, marca como não lida para atendimento humano
+        if (typeof chat.markUnread === 'function') {
+          await chat.markUnread();
+          console.log(`ℹ️ Mensagem marcada como não lida para atendimento humano - ${companySlug}`);
+        } else {
+          console.log(`ℹ️ Sem resposta da IA para ${companySlug}, método markUnread não disponível nesta versão`);
+        }
       }
     } catch (error) {
       console.error(`❌ Erro ao processar mensagem para ${companySlug}:`, error.message);
