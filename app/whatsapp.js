@@ -4,6 +4,137 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 
 const sessions = {};
 
+// === Configuracao de reconnect ===
+const RECONNECT_CONFIG = {
+  initialDelayMs: 5000,     // 5 segundos
+  maxDelayMs: 20000,        // 20 segundos
+  maxAttempts: 3,           // 3 tentativas (5s, 10s, 20s)
+  backoffMultiplier: 2,
+};
+
+// Motivos que NAO devem disparar auto-reconnect
+const PERMANENT_FAILURE_REASONS = [
+  'LOGOUT',
+  'TOS_BLOCK',
+  'SMB_TOS_BLOCK',
+  'DEPRECATED_VERSION',
+];
+
+function shouldAutoReconnect(reason) {
+  if (typeof reason === 'string') {
+    return !PERMANENT_FAILURE_REASONS.includes(reason);
+  }
+  return true;
+}
+
+function getReconnectDelay(attempt) {
+  const delay = RECONNECT_CONFIG.initialDelayMs *
+    Math.pow(RECONNECT_CONFIG.backoffMultiplier, attempt);
+  return Math.min(delay, RECONNECT_CONFIG.maxDelayMs);
+}
+
+// Destroi o client de forma segura com fallback para SIGKILL
+async function safeDestroyClient(companySlug) {
+  const session = sessions[companySlug];
+  if (!session || !session.client) {
+    delete sessions[companySlug];
+    return;
+  }
+
+  if (session.destroying) {
+    console.log(`[DESTROY] ${companySlug}: ja esta sendo destruido, ignorando`);
+    return;
+  }
+  session.destroying = true;
+
+  // Limpa timer de reconnect pendente
+  if (session.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
+  }
+
+  const client = session.client;
+
+  // Passo 1: Tenta destroy graceful com timeout de 10s
+  try {
+    await Promise.race([
+      client.destroy(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('destroy timeout')), 10000)
+      ),
+    ]);
+    console.log(`[DESTROY] ${companySlug}: client.destroy() ok`);
+  } catch (e) {
+    console.log(`[DESTROY] ${companySlug}: client.destroy() falhou: ${e.message}`);
+
+    // Passo 2: Forca SIGKILL no processo Chrome se destroy falhou
+    try {
+      if (client.pupBrowser) {
+        const browserProcess = client.pupBrowser.process();
+        if (browserProcess) {
+          console.log(`[DESTROY] ${companySlug}: forçando kill no Chrome PID ${browserProcess.pid}`);
+          browserProcess.kill('SIGKILL');
+        }
+      }
+    } catch (killErr) {
+      console.log(`[DESTROY] ${companySlug}: force-kill falhou: ${killErr.message}`);
+    }
+  }
+
+  // Passo 3: Remove sessao da memoria
+  delete sessions[companySlug];
+  console.log(`[DESTROY] ${companySlug}: sessao removida da memoria`);
+}
+
+// Agenda reconnect com backoff exponencial
+async function scheduleReconnect(companySlug, reason) {
+  if (!sessions[companySlug]) {
+    console.log(`[RECONNECT] ${companySlug}: sessao removida, cancelando reconnect`);
+    return;
+  }
+
+  const session = sessions[companySlug];
+  const attempt = session.reconnectAttempts || 0;
+
+  if (attempt >= RECONNECT_CONFIG.maxAttempts) {
+    console.log(`[RECONNECT] ${companySlug}: max tentativas (${RECONNECT_CONFIG.maxAttempts}) atingido, desistindo`);
+    await safeDestroyClient(companySlug);
+    return;
+  }
+
+  const delay = getReconnectDelay(attempt);
+  console.log(`[RECONNECT] ${companySlug}: tentativa ${attempt + 1}/${RECONNECT_CONFIG.maxAttempts} em ${delay / 1000}s (motivo: ${reason})`);
+
+  session.reconnectTimer = setTimeout(async () => {
+    try {
+      // Destroi o client antigo
+      await safeDestroyClient(companySlug);
+
+      // Cria sessao nova
+      console.log(`[RECONNECT] ${companySlug}: criando sessao nova...`);
+      await createSession(companySlug);
+
+      // Espera 15s para ver se conectou (LocalAuth tenta reconectar automaticamente)
+      await new Promise(resolve => setTimeout(resolve, 15000));
+
+      if (sessions[companySlug] && sessions[companySlug].ready) {
+        console.log(`[RECONNECT] ${companySlug}: reconectou com sucesso!`);
+        sessions[companySlug].reconnectAttempts = 0;
+      } else if (sessions[companySlug]) {
+        // Nao conectou, incrementa e tenta de novo
+        sessions[companySlug].reconnectAttempts = attempt + 1;
+        await scheduleReconnect(companySlug, reason);
+      }
+    } catch (err) {
+      console.log(`[RECONNECT] ${companySlug}: tentativa falhou: ${err.message}`);
+      if (sessions[companySlug]) {
+        sessions[companySlug].reconnectAttempts = attempt + 1;
+        await scheduleReconnect(companySlug, reason);
+      }
+    }
+  }, delay);
+}
+
 async function getStatus(companySlug) {
   // PRIMEIRA VERIFICAÇÃO: Se já existe uma sessão conectada
   if (sessions[companySlug] && sessions[companySlug].ready) {
@@ -220,7 +351,17 @@ async function createSession(companySlug) {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-translate',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-component-update',
       ]
     },
     // Workaround para bug "markedUnread" - usa versão específica do WhatsApp Web
@@ -236,6 +377,12 @@ async function createSession(companySlug) {
     qrCode: null,
     ready: false,
     connecting: false,
+    // Controle de reconnect
+    reconnectAttempts: 0,
+    reconnectTimer: null,
+    lastDisconnectTime: null,
+    lastDisconnectReason: null,
+    destroying: false,
   };
 
   client.on("qr", (qr) => {
@@ -271,47 +418,64 @@ async function createSession(companySlug) {
     }
   });
 
-  client.on("disconnected", (reason) => {
-    console.log(
-      `❌ WhatsApp desconectado para empresa ${companySlug}:`,
-      reason
-    );
-    if (sessions[companySlug]) {
-      sessions[companySlug].ready = false;
-      sessions[companySlug].qrCode = null;
+  client.on("disconnected", async (reason) => {
+    console.log(`[EVENT] ${companySlug} disconnected: ${reason}`);
+    if (!sessions[companySlug]) return;
+
+    sessions[companySlug].ready = false;
+    sessions[companySlug].qrCode = null;
+    sessions[companySlug].lastDisconnectTime = Date.now();
+    sessions[companySlug].lastDisconnectReason = reason;
+
+    if (shouldAutoReconnect(reason)) {
+      await scheduleReconnect(companySlug, reason);
+    } else {
+      console.log(`[EVENT] ${companySlug}: falha permanente (${reason}), destruindo sem reconnect`);
+      await safeDestroyClient(companySlug);
     }
   });
 
-  client.on("auth_failure", (msg) => {
-    console.log(`🚫 Falha de autenticação para empresa ${companySlug}:`, msg);
-    if (sessions[companySlug]) {
-      sessions[companySlug].ready = false;
-      sessions[companySlug].qrCode = null;
-    }
+  client.on("auth_failure", async (msg) => {
+    console.log(`[EVENT] ${companySlug} auth_failure: ${msg}`);
+    // Auth failure nunca reconecta - usuario precisa re-escanear QR
+    await safeDestroyClient(companySlug);
   });
 
   client.on("change_state", (state) => {
-    console.log(`🔄 Estado alterado para empresa ${companySlug}:`, state);
-    if (
-      state === "DISCONNECTED" ||
-      state === "UNPAIRED" ||
-      state === "UNLAUNCHED"
-    ) {
-      if (sessions[companySlug]) {
-        sessions[companySlug].ready = false;
-        sessions[companySlug].connecting = false;
-        sessions[companySlug].qrCode = null;
-      }
+    console.log(`[EVENT] ${companySlug} state changed: ${state}`);
+    if (!sessions[companySlug]) return;
+
+    if (state === 'CONNECTED') {
+      sessions[companySlug].ready = true;
+      sessions[companySlug].reconnectAttempts = 0;
+    }
+    // Para estados desconectados, apenas atualiza flags.
+    // O evento 'disconnected' cuida do destroy/reconnect.
+    const badStates = ['DISCONNECTED', 'UNPAIRED', 'UNLAUNCHED', 'UNPAIRED_IDLE'];
+    if (badStates.includes(state)) {
+      sessions[companySlug].ready = false;
+      sessions[companySlug].connecting = false;
     }
   });
 
   // Captura erros do puppeteer/chrome
-  client.on("error", (error) => {
-    console.log(`❌ Erro no cliente ${companySlug}:`, error.message);
-    if (sessions[companySlug]) {
-      sessions[companySlug].ready = false;
-      sessions[companySlug].connecting = false;
-      sessions[companySlug].qrCode = null;
+  client.on("error", async (error) => {
+    console.log(`[EVENT] ${companySlug} error: ${error.message}`);
+    if (!sessions[companySlug]) return;
+
+    sessions[companySlug].ready = false;
+    sessions[companySlug].connecting = false;
+
+    // Erros de Chrome/Puppeteer disparam reconnect
+    const isBrowserError = error.message.includes('Protocol error') ||
+      error.message.includes('Target closed') ||
+      error.message.includes('Session closed') ||
+      error.message.includes('Navigation failed');
+
+    if (isBrowserError) {
+      sessions[companySlug].lastDisconnectTime = Date.now();
+      sessions[companySlug].lastDisconnectReason = `error:${error.message.substring(0, 50)}`;
+      await scheduleReconnect(companySlug, `error:${error.message.substring(0, 50)}`);
     }
   });
 
@@ -904,20 +1068,18 @@ function getClient(companySlug) {
 // Função para forçar limpeza de uma sessão com logout completo
 async function clearSession(companySlug) {
   if (!sessions[companySlug]) {
-    console.log(`⚠️ Sessão ${companySlug} não existe`);
-    return { success: false, message: "Sessão não existe" };
+    console.log(`[CLEAR] Sessao ${companySlug} nao existe`);
+    return { success: false, message: "Sessao nao existe" };
   }
 
   const client = sessions[companySlug].client;
   let logoutSuccess = false;
-  let destroySuccess = false;
 
-  console.log(`🧹 Iniciando limpeza completa da sessão ${companySlug}...`);
+  console.log(`[CLEAR] Iniciando limpeza completa da sessao ${companySlug}...`);
 
   // PRIMEIRO: Tenta fazer logout do WhatsApp (desconecta do celular)
   if (client) {
     try {
-      console.log(`📱 Fazendo logout do WhatsApp para ${companySlug}...`);
       await Promise.race([
         client.logout(),
         new Promise((_, reject) =>
@@ -925,45 +1087,26 @@ async function clearSession(companySlug) {
         ),
       ]);
       logoutSuccess = true;
-      console.log(`✅ Logout realizado com sucesso para ${companySlug}`);
+      console.log(`[CLEAR] ${companySlug}: logout ok`);
     } catch (e) {
-      console.log(`⚠️ Erro no logout para ${companySlug}:`, e.message);
-      // Continua mesmo se logout falhar
-    }
-
-    // SEGUNDO: Destroi o cliente (limpa sessão local)
-    try {
-      console.log(`🗑️ Destruindo cliente ${companySlug}...`);
-      await client.destroy();
-      destroySuccess = true;
-      console.log(`✅ Cliente ${companySlug} destruído com sucesso`);
-    } catch (e) {
-      console.log(`⚠️ Erro ao destruir cliente ${companySlug}:`, e.message);
-      // Continua mesmo se destroy falhar
+      console.log(`[CLEAR] ${companySlug}: logout falhou: ${e.message}`);
     }
   }
 
-  // TERCEIRO: Remove da lista de sessões
-  delete sessions[companySlug];
-  console.log(`🗑️ Sessão ${companySlug} removida da lista`);
+  // SEGUNDO: Destroi o client e remove a sessao usando safeDestroyClient
+  await safeDestroyClient(companySlug);
 
   const result = {
     success: true,
-    message: `Sessão ${companySlug} foi limpa`,
+    message: logoutSuccess
+      ? `Sessao ${companySlug} limpa e logout realizado no WhatsApp`
+      : `Sessao ${companySlug} limpa (logout do WhatsApp pode ter falhado)`,
     details: {
       logoutSuccess,
-      destroySuccess,
       sessionRemoved: true,
     },
+    whatsappLoggedOut: logoutSuccess,
   };
-
-  if (logoutSuccess) {
-    result.message += " e logout realizado no WhatsApp";
-    result.whatsappLoggedOut = true;
-  } else {
-    result.message += " (logout do WhatsApp pode ter falhado)";
-    result.whatsappLoggedOut = false;
-  }
 
   return result;
 }
@@ -1090,6 +1233,12 @@ function listSessions() {
       connecting: session.connecting,
       hasQrCode: !!session.qrCode,
       lastBatteryUpdate: session.lastBatteryUpdate || null,
+      reconnectAttempts: session.reconnectAttempts || 0,
+      lastDisconnectReason: session.lastDisconnectReason || null,
+      lastDisconnectTime: session.lastDisconnectTime
+        ? new Date(session.lastDisconnectTime).toISOString()
+        : null,
+      hasPendingReconnect: !!session.reconnectTimer,
     };
   }
   return sessionList;
@@ -1226,6 +1375,80 @@ async function clearAllSessions() {
   };
 }
 
+// === Monitor de sessoes zumbi ===
+const HEALTH_CHECK_INTERVAL_MS = 60000; // 1 minuto
+
+async function zombieSessionMonitor() {
+  const slugs = Object.keys(sessions);
+  if (slugs.length === 0) return;
+
+  console.log(`[HEALTH] Verificando ${slugs.length} sessoes...`);
+
+  for (const slug of slugs) {
+    const session = sessions[slug];
+    if (!session || !session.client) continue;
+
+    // Pula sessoes conectando ou sendo destruidas
+    if (session.connecting || session.destroying) continue;
+
+    // Pula sessoes com reconnect pendente
+    if (session.reconnectTimer) continue;
+
+    try {
+      const client = session.client;
+
+      // Check 1: Browser page ainda viva?
+      if (!client.pupPage || client.pupPage.isClosed()) {
+        console.log(`[HEALTH] ${slug}: browser page fechada, limpando`);
+        await safeDestroyClient(slug);
+        continue;
+      }
+
+      // Check 2: Processo Chrome ainda rodando?
+      if (client.pupBrowser) {
+        const proc = client.pupBrowser.process();
+        if (proc && proc.killed) {
+          console.log(`[HEALTH] ${slug}: processo Chrome morto, limpando`);
+          await safeDestroyClient(slug);
+          continue;
+        }
+      }
+
+      // Check 3: Sessao ready mas nao responde?
+      if (session.ready) {
+        try {
+          await Promise.race([
+            client.getState(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('health-check-timeout')), 8000)
+            ),
+          ]);
+        } catch (e) {
+          console.log(`[HEALTH] ${slug}: ready mas sem resposta (${e.message}), agendando reconnect`);
+          session.ready = false;
+          session.lastDisconnectTime = Date.now();
+          session.lastDisconnectReason = 'health-check-failed';
+          await scheduleReconnect(slug, 'health-check-failed');
+        }
+      }
+
+      // Check 4: Sessao desconectada ha mais de 10 min sem reconnect pendente
+      if (!session.ready && session.lastDisconnectTime) {
+        const stuckDuration = Date.now() - session.lastDisconnectTime;
+        if (stuckDuration > 600000) { // 10 minutos
+          console.log(`[HEALTH] ${slug}: desconectada ha ${Math.round(stuckDuration / 60000)}min, destruindo`);
+          await safeDestroyClient(slug);
+        }
+      }
+    } catch (err) {
+      console.log(`[HEALTH] ${slug}: erro durante verificacao: ${err.message}`);
+    }
+  }
+}
+
+// Inicia o monitor
+setInterval(zombieSessionMonitor, HEALTH_CHECK_INTERVAL_MS);
+
 module.exports = {
   getStatus,
   checkConnectionStatus,
@@ -1239,4 +1462,5 @@ module.exports = {
   deleteAllCompaniesAndSessions,
   listSessions,
   searchNumberInfo,
+  safeDestroyClient,
 };

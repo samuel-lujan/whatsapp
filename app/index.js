@@ -428,14 +428,44 @@ app.listen(PORT, () => {
   console.log(`\nPressione Ctrl+C para parar o servidor`);
 });
 
-// Tratamento graceful para encerramento do servidor
-process.on('SIGINT', () => {
-  console.log('\n🔄 Encerrando servidor...');
-  process.exit(0);
-});
+// Graceful shutdown - limpa todas as sessoes/Chrome antes de sair
+let isShuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
 
-process.on('SIGTERM', () => {
-  console.log('\n🔄 Encerrando servidor...');
+  console.log(`\n[SHUTDOWN] Recebido ${signal}, limpando todas as sessoes...`);
+
+  try {
+    await Promise.race([
+      whatsapp.clearAllSessions(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('shutdown timeout')), 30000)
+      ),
+    ]);
+    console.log(`[SHUTDOWN] Sessoes limpas com sucesso`);
+  } catch (err) {
+    console.log(`[SHUTDOWN] Erro/timeout na limpeza: ${err.message}`);
+  }
+
+  // Ultimo recurso: mata processos Chrome orfaos
+  try {
+    const { execSync } = require('child_process');
+    execSync('pkill -f "chromium.*--no-sandbox" || true', { timeout: 5000 });
+  } catch (e) {
+    // pkill retorna non-zero se nenhum processo encontrado
+  }
+
+  console.log(`[SHUTDOWN] Saindo.`);
   process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Excecao nao capturada:', err.message);
+  rollbar.error(err);
+  gracefulShutdown('uncaughtException');
 });
 

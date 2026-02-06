@@ -18,6 +18,7 @@ module.exports = {
       min_uptime: '120s',
       max_restarts: 10,
       restart_delay: 15000,
+      kill_timeout: 35000,       // 35s para graceful shutdown antes do SIGKILL
 
       // 🧾 Logs
       error_file: '/var/log/pm2-whatsapp-error.log',
