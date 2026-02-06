@@ -102,6 +102,12 @@ async function scheduleReconnect(companySlug, reason) {
     return;
   }
 
+  // Cancela timer anterior se existir (evita timers duplicados)
+  if (session.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
+  }
+
   const delay = getReconnectDelay(attempt);
   console.log(`[RECONNECT] ${companySlug}: tentativa ${attempt + 1}/${RECONNECT_CONFIG.maxAttempts} em ${delay / 1000}s (motivo: ${reason})`);
 
@@ -332,6 +338,12 @@ function checkConnectionStatus(companySlug) {
 }
 
 async function createSession(companySlug) {
+  // Evita criação duplicada se já existe sessão ativa ou em conexão
+  if (sessions[companySlug] && (sessions[companySlug].ready || sessions[companySlug].connecting)) {
+    console.log(`[CREATE] ${companySlug}: sessão já existe (ready=${sessions[companySlug].ready}, connecting=${sessions[companySlug].connecting}), ignorando`);
+    return;
+  }
+
   const isProduction = process.env.NODE_ENV === "production";
   const isHeadless = isProduction || process.env.HEADLESS === "true";
 
@@ -470,7 +482,8 @@ async function createSession(companySlug) {
     const isBrowserError = error.message.includes('Protocol error') ||
       error.message.includes('Target closed') ||
       error.message.includes('Session closed') ||
-      error.message.includes('Navigation failed');
+      error.message.includes('Navigation failed') ||
+      error.message.includes('Execution context was destroyed');
 
     if (isBrowserError) {
       sessions[companySlug].lastDisconnectTime = Date.now();
@@ -524,6 +537,20 @@ async function createSession(companySlug) {
       }
     } catch (error) {
       console.error(`❌ Erro ao processar mensagem para ${companySlug}:`, error.message);
+
+      // Se for erro de contexto destruído, dispara reconnect
+      const isBrowserError = error.message.includes('Execution context was destroyed') ||
+        error.message.includes('Protocol error') ||
+        error.message.includes('Target closed') ||
+        error.message.includes('Session closed');
+
+      if (isBrowserError && sessions[companySlug]) {
+        console.log(`🔄 Erro de browser detectado no handler de mensagem, agendando reconnect para ${companySlug}`);
+        sessions[companySlug].ready = false;
+        sessions[companySlug].lastDisconnectTime = Date.now();
+        sessions[companySlug].lastDisconnectReason = `message_handler:${error.message.substring(0, 50)}`;
+        await scheduleReconnect(companySlug, `message_handler:${error.message.substring(0, 50)}`);
+      }
     }
   });
 
@@ -1047,7 +1074,8 @@ async function sendMessage(companySlug, number, message) {
     if (
       error.message.includes("getChat") ||
       error.message.includes("perdeu conexão") ||
-      error.message.includes("Protocol error")
+      error.message.includes("Protocol error") ||
+      error.message.includes("Execution context was destroyed")
     ) {
       throw new Error(
         `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`
