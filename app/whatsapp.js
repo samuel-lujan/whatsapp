@@ -75,6 +75,24 @@ async function safeDestroyClient(companySlug) {
           console.log(`[DESTROY] ${companySlug}: forçando kill no Chrome PID ${browserProcess.pid}`);
           browserProcess.kill('SIGKILL');
         }
+      } else {
+        // pupBrowser é null - tenta matar processos Chrome órfãos pelo userDataDir
+        console.log(`[DESTROY] ${companySlug}: pupBrowser null, buscando processos Chrome órfãos...`);
+        try {
+          const { execSync } = require('child_process');
+          const sessionDir = `session-${companySlug}`;
+          const result = execSync(`pgrep -f "${sessionDir}" || true`, { timeout: 5000 }).toString().trim();
+          if (result) {
+            const pids = result.split('\n').filter(Boolean);
+            console.log(`[DESTROY] ${companySlug}: encontrados ${pids.length} processos órfãos: ${pids.join(', ')}`);
+            execSync(`kill -9 ${pids.join(' ')} || true`, { timeout: 5000 });
+            console.log(`[DESTROY] ${companySlug}: processos órfãos eliminados`);
+          } else {
+            console.log(`[DESTROY] ${companySlug}: nenhum processo Chrome órfão encontrado`);
+          }
+        } catch (pgrepErr) {
+          console.log(`[DESTROY] ${companySlug}: busca de processos órfãos falhou: ${pgrepErr.message}`);
+        }
       }
     } catch (killErr) {
       console.log(`[DESTROY] ${companySlug}: force-kill falhou: ${killErr.message}`);
@@ -191,7 +209,12 @@ async function getStatus(companySlug) {
         `⚠️ Cliente ${companySlug} não está realmente conectado:`,
         error.message
       );
-      // Continua com o fluxo normal
+
+      // Se o client está com page/browser null, é uma sessão zumbi - destrói para permitir recriação
+      if (error.message.includes('null') || error.message.includes('destroyed') || error.message === 'timeout') {
+        console.log(`[ZOMBIE] ${companySlug}: sessão zumbi detectada (connecting=${sessions[companySlug]?.connecting}, ready=${sessions[companySlug]?.ready}) - destruindo...`);
+        await safeDestroyClient(companySlug);
+      }
     }
   }
 
@@ -332,6 +355,22 @@ function checkConnectionStatus(companySlug) {
 }
 
 async function createSession(companySlug) {
+  // Mata processos Chrome órfãos que possam estar travando o userDataDir
+  try {
+    const { execSync } = require('child_process');
+    const sessionDir = `session-${companySlug}`;
+    const orphanPids = execSync(`pgrep -f "${sessionDir}" || true`, { timeout: 5000 }).toString().trim();
+    if (orphanPids) {
+      const pids = orphanPids.split('\n').filter(Boolean);
+      console.log(`[CREATE] ${companySlug}: matando ${pids.length} processos Chrome órfãos antes de criar sessão: ${pids.join(', ')}`);
+      execSync(`kill -9 ${pids.join(' ')} || true`, { timeout: 5000 });
+      // Aguarda breve para o SO liberar os locks do userDataDir
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  } catch (e) {
+    console.log(`[CREATE] ${companySlug}: falha ao verificar processos órfãos: ${e.message}`);
+  }
+
   const isProduction = process.env.NODE_ENV === "production";
   const isHeadless = isProduction || process.env.HEADLESS === "true";
 
