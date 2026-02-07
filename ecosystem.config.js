@@ -12,7 +12,7 @@ module.exports = {
       watch: false,
 
       // 🧠 Agora podemos subir o limite
-      max_memory_restart: '2G',
+      max_memory_restart: '4G',
 
       // 🔁 Controle de crash
       min_uptime: '120s',

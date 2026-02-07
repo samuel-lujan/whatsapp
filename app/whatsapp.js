@@ -407,7 +407,7 @@ async function createSession(companySlug) {
     // Issue: https://github.com/pedroslopez/whatsapp-web.js/issues/5718
     webVersionCache: {
       type: 'remote',
-      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/refs/heads/main/html/2.3000.1031490220-alpha.html',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/refs/heads/main/html/2.3000.1033090211-alpha.html',
     }
   });
 
@@ -430,10 +430,11 @@ async function createSession(companySlug) {
   });
 
   client.on("authenticated", (session) => {
-    console.log(`🔐 Cliente ${companySlug} autenticado - sessão salva`);
-    if (sessions[companySlug]) {
-      sessions[companySlug].connecting = false; // Já foi autenticado
-    }
+    console.log(`🔐 Cliente ${companySlug} autenticado - aguardando ready...`);
+    // NÃO seta connecting = false aqui - o evento ready é quem deve fazer isso.
+    // Setar connecting = false antes do ready cria uma janela onde a sessão
+    // tem connecting=false e ready=false, fazendo getStatus não reconhecer
+    // que ainda está no processo de conexão.
   });
 
   client.on("ready", async () => {
