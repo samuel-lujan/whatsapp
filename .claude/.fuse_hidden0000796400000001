@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm view:*)",
+      "Bash(git fetch:*)",
+      "Bash(git rebase:*)",
+      "Bash(git add:*)",
+      "Bash(git checkout:*)",
+      "WebFetch(domain:docs.wwebjs.dev)",
+      "Bash(wc:*)",
+      "Bash(node -c:*)"
+    ]
+  }
+}
