@@ -184,19 +184,27 @@ app.post("/send-message/:companySlug", authenticateToken, async (req, res) => {
     console.error(`❌ Erro ao enviar mensagem pela empresa ${companySlug}:`, err.message);
     rollbar.error(err, { companySlug, number, route: '/send-message/:companySlug' });
     
-    // Determina o status code baseado no tipo de erro
-    let statusCode = 500;
-    if (err.message.includes('perdeu conexão') || err.message.includes('não está conectada')) {
-      statusCode = 422;
+    // Usa statusCode do erro se disponível, senão infere do tipo de erro
+    let statusCode = err.statusCode || 500;
+    if (!err.statusCode) {
+      if (err.message.includes('perdeu conexão') || err.message.includes('não está conectada')) {
+        statusCode = 422;
+      }
     }
+    
+    // Determina se deve sugerir retry
+    const shouldRetry = err.shouldRetry !== undefined ? err.shouldRetry : false;
     
     res.status(statusCode).json({ 
       error: err.message,
       companySlug,
       originalNumber: number,
+      shouldRetry,
       suggestion: err.message.includes('/status/') 
         ? "Reconecte usando a rota /status" 
-        : `Verifique se a empresa ${companySlug} está conectada em /status/${companySlug}`
+        : shouldRetry 
+          ? "Tente novamente em alguns segundos"
+          : `Verifique se a empresa ${companySlug} está conectada em /status/${companySlug}`
     });
   }
 });

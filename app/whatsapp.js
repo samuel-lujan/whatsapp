@@ -383,6 +383,7 @@ async function createSession(companySlug) {
     authStrategy: new LocalAuth({ clientId: companySlug }),
     puppeteer: {
       headless: isHeadless,
+      protocolTimeout: 120000, // 2 minutos - evita "Runtime.callFunctionOn timed out"
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -917,37 +918,30 @@ async function validateWhatsAppNumber(client, number) {
 
 /**
  * Envia mensagem para WhatsApp com validação automática do número
+ * 
+ * OPÇÃO B: Confia no flag ready e tenta enviar direto.
+ * Verificação de saúde só é feita em caso de erro de conexão.
+ * Isso evita falsos positivos que destruíam sessões funcionais.
  */
 async function sendMessage(companySlug, number, message) {
-  if (!sessions[companySlug] || !sessions[companySlug].ready) {
-    throw new Error(`Empresa ${companySlug} não está conectada ao WhatsApp`);
+  // Verificação básica: sessão existe e está marcada como ready
+  if (!sessions[companySlug]) {
+    const err = new Error(`Empresa ${companySlug} não existe. Acesse /status/${companySlug} para criar sessão.`);
+    err.shouldRetry = false;
+    err.statusCode = 422;
+    throw err;
+  }
+  
+  if (!sessions[companySlug].ready) {
+    const err = new Error(`Empresa ${companySlug} não está conectada ao WhatsApp. Acesse /status/${companySlug} para reconectar.`);
+    err.shouldRetry = false;
+    err.statusCode = 422;
+    throw err;
   }
 
-  // Verifica a saúde do cliente antes de enviar
-  console.log(
-    `🔍 Verificando saúde do cliente ${companySlug} antes de enviar mensagem...`
-  );
-  const healthCheck = await verifyClientHealth(companySlug);
-
-  if (!healthCheck.healthy) {
-    console.log(
-      `⚠️ Cliente ${companySlug} não está saudável:`,
-      healthCheck.reason
-    );
-
-    // Marca como não conectado para forçar reconexão
-    sessions[companySlug].ready = false;
-
-    if (healthCheck.shouldReconnect) {
-      throw new Error(
-        `Cliente ${companySlug} perdeu conexão. Erro: ${healthCheck.reason}. Acesse /status/${companySlug} para reconectar.`
-      );
-    } else {
-      throw new Error(
-        `Cliente ${companySlug} não está funcional: ${healthCheck.reason}`
-      );
-    }
-  }
+  // Confia no ready flag - não faz verificação de saúde prévia
+  // A verificação só será feita se o envio falhar por erro de conexão
+  console.log(`📤 Iniciando envio para ${companySlug} (ready=${sessions[companySlug].ready})`);
 
   try {
     const client = sessions[companySlug].client;
@@ -1020,6 +1014,7 @@ async function sendMessage(companySlug, number, message) {
       error.statusCode === 400 ||
       error.message.includes("não é um usuário válido")
     ) {
+      error.shouldRetry = false;
       throw error;
     }
 
@@ -1072,29 +1067,92 @@ async function sendMessage(companySlug, number, message) {
       }
 
       // Se o retry também falhou, lança erro sem marcar como desconectado
-      throw new Error(`Erro temporário ao enviar mensagem. Tente novamente.`);
+      const tempErr = new Error(`Erro temporário ao enviar mensagem. Tente novamente.`);
+      tempErr.shouldRetry = true;
+      tempErr.statusCode = 422;
+      throw tempErr;
     }
 
-    // Se houve erro de conexão real, marca como não conectado
-    if (sessions[companySlug]) {
-      sessions[companySlug].ready = false;
-      console.log(
-        `🔄 Marcando cliente ${companySlug} como não conectado devido a erro no envio`
-      );
+    // === ERROS DE TIMEOUT/CONEXÃO ===
+    // Estes erros indicam problema de comunicação com o Chrome/WhatsApp
+    const timeoutErrors = [
+      "timed out",
+      "timeout",
+      "Protocol error",
+      "Target closed",
+      "Session closed",
+      "Navigation failed",
+    ];
+    
+    const isTimeoutError = timeoutErrors.some((t) =>
+      error.message.toLowerCase().includes(t.toLowerCase())
+    );
+
+    if (isTimeoutError) {
+      console.log(`⏱️ Erro de timeout detectado para ${companySlug}: ${error.message}`);
+      
+      // Verifica se a sessão ainda está realmente funcional antes de marcar como morta
+      console.log(`🔍 Verificando saúde do cliente ${companySlug} após erro de timeout...`);
+      const healthCheck = await verifyClientHealth(companySlug);
+      
+      if (!healthCheck.healthy) {
+        console.log(`❌ Cliente ${companySlug} confirmado como não saudável: ${healthCheck.reason}`);
+        if (sessions[companySlug]) {
+          sessions[companySlug].ready = false;
+        }
+        
+        const connErr = new Error(
+          `Cliente ${companySlug} perdeu conexão (timeout). Acesse /status/${companySlug} para reconectar.`
+        );
+        connErr.shouldRetry = false;
+        connErr.statusCode = 422;
+        throw connErr;
+      } else {
+        // Sessão está OK, foi só um timeout temporário
+        console.log(`✅ Cliente ${companySlug} ainda está saudável após timeout - erro temporário`);
+        const tempErr = new Error(
+          `Timeout temporário ao enviar mensagem. A conexão está OK - tente novamente.`
+        );
+        tempErr.shouldRetry = true;
+        tempErr.statusCode = 422;
+        throw tempErr;
+      }
     }
 
-    // Erros que realmente indicam perda de conexão
-    if (
-      error.message.includes("getChat") ||
-      error.message.includes("perdeu conexão") ||
-      error.message.includes("Protocol error")
-    ) {
-      throw new Error(
+    // === ERROS DE CONEXÃO DEFINITIVOS ===
+    const connectionErrors = [
+      "getChat",
+      "perdeu conexão",
+      "not connected",
+      "UNPAIRED",
+      "UNLAUNCHED",
+    ];
+    
+    const isConnectionError = connectionErrors.some((c) =>
+      error.message.includes(c)
+    );
+
+    if (isConnectionError) {
+      console.log(`🔌 Erro de conexão definitivo para ${companySlug}`);
+      if (sessions[companySlug]) {
+        sessions[companySlug].ready = false;
+      }
+      
+      const connErr = new Error(
         `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`
       );
+      connErr.shouldRetry = false;
+      connErr.statusCode = 422;
+      throw connErr;
     }
 
-    throw new Error(`Erro ao enviar mensagem: ${error.message}`);
+    // === OUTROS ERROS ===
+    // Erros desconhecidos - permite retry mas não marca como desconectado imediatamente
+    console.log(`⚠️ Erro desconhecido ao enviar para ${companySlug}: ${error.message}`);
+    const unknownErr = new Error(`Erro ao enviar mensagem: ${error.message}`);
+    unknownErr.shouldRetry = true; // Permite retry para erros desconhecidos
+    unknownErr.statusCode = 422;
+    throw unknownErr;
   }
 }
 
