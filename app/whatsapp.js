@@ -1066,11 +1066,30 @@ async function sendMessage(companySlug, number, message) {
         // Se falhar no retry, continua com o fluxo normal de erro
       }
 
-      // Se o retry também falhou, lança erro sem marcar como desconectado
-      const tempErr = new Error(`Erro temporário ao enviar mensagem. Tente novamente.`);
-      tempErr.shouldRetry = true;
-      tempErr.statusCode = 422;
-      throw tempErr;
+      // Envio falhou + retry falhou = sessão está morta
+      // Mata a sessão, limpa auth data e força novo QR Code
+      console.log(`❌ Envio e retry falharam para ${companySlug}. Destruindo sessão e limpando auth para forçar novo QR Code...`);
+
+      // 1. Destroi a sessão em memória e mata o Chrome
+      await safeDestroyClient(companySlug);
+
+      // 2. Remove os dados de autenticação desta empresa para forçar novo QR Code
+      try {
+        const fs = require('fs').promises;
+        const path = require('path');
+        const authDir = path.resolve(__dirname, '..', '.wwebjs_auth', `session-${companySlug}`);
+        await fs.rm(authDir, { recursive: true, force: true });
+        console.log(`🗑️ Auth data removido: ${authDir}`);
+      } catch (cleanErr) {
+        console.log(`⚠️ Erro ao limpar auth data de ${companySlug}: ${cleanErr.message}`);
+      }
+
+      const connErr = new Error(
+        `Falha ao enviar mensagem. Sessão ${companySlug} foi encerrada. Acesse /status/${companySlug} para escanear novo QR Code.`
+      );
+      connErr.shouldRetry = false;
+      connErr.statusCode = 422;
+      throw connErr;
     }
 
     // === ERROS DE TIMEOUT/CONEXÃO ===
