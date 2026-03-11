@@ -12,6 +12,7 @@ const CHAT_CACHE = [];
 
 const APP_TOKEN = process.env.APP_TOKEN;
 const BETA_HASH = process.env.BETA_HASH;
+const TRANSCRIPTION = process.env.TRANSCRIPTION;
 
 function getApiUrl(companySlug) {
   switch (companySlug) {
@@ -213,7 +214,13 @@ export async function getAiResponse(message, chat, companySlug) {
         body: "Desculpe, mas não consigo processar imagens no momento. Por favor, envie uma mensagem de texto.",
       };
     } else if (message.type === "audio" || message.type === "ptt") {
-      console.log("Entrei no audio...");
+      if (!TRANSCRIPTION) {
+        return {
+          success: true,
+          body: "Desculpe, não consigo processar mensagens de áudio no momento. Por favor, envie uma mensagem de texto.",
+        };
+      }
+
       try {
         const media = await message.downloadMedia();
         const mediaData = media?.data;
@@ -255,7 +262,7 @@ export async function getAiResponse(message, chat, companySlug) {
         console.log("Erro ao transcrever áudio: ", e.message);
         return {
           success: true,
-          body: "Desculpe, não consigo processar mensagens de áudio no momento. Por favor, envie uma mensagem de texto.",
+          body: "Desculpe, Houve um erro analisando seu áudio. Por favor, envie uma mensagem de texto.",
         };
       }
     }
