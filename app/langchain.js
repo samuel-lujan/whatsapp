@@ -12,7 +12,7 @@ const CHAT_CACHE = [];
 
 const APP_TOKEN = process.env.APP_TOKEN;
 const BETA_HASH = process.env.BETA_HASH;
-const TRANSCRIPTION = process.env.TRANSCRIPTION;
+const TRANSCRIPTION = process.env.TRANSCRIPTION === "true";
 
 function getApiUrl(companySlug) {
   switch (companySlug) {
