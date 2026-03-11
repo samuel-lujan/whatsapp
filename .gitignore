@@ -1,4 +1,4 @@
 node_modules/
 .env
 .ww*
-test/test-response.json
+test/test-responses.json
