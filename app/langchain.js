@@ -1,5 +1,8 @@
 import { Client } from "@langchain/langgraph-sdk";
 import crypto from "crypto";
+import transcribeModule from "./transcribe.js";
+
+const { transcribeAudio } = transcribeModule;
 
 const client = new Client({ apiUrl: "http://localhost:8130" });
 // Using the graph deployed with the name "agent"
@@ -48,7 +51,7 @@ async function getUser(url, token) {
 
   if (!response.ok) {
     throw new Error(
-      `Erro ao buscar info do telefone ${body.cellphone}, Status: ${response.status}`
+      `Erro ao buscar info do telefone ${body.cellphone}, Status: ${response.status}`,
     );
   }
 
@@ -68,7 +71,7 @@ async function postLogin(url, body) {
 
   if (!response.ok) {
     throw new Error(
-      `Erro ao tentar logar com número de telefone ${body.cellphone}, Status: ${response.status}`
+      `Erro ao tentar logar com número de telefone ${body.cellphone}, Status: ${response.status}`,
     );
   }
 
@@ -90,6 +93,7 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
     .update(`${msgTo}`, "utf8")
     .digest("hex");
 
+  console.log("Receiver hash: ", receiver_hash);
   if (receiver_hash != BETA_HASH) {
     return null;
   }
@@ -100,7 +104,7 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
     .digest("hex");
 
   const foundIndex = CHAT_CACHE.findIndex(
-    (session) => session.sessionId === sessionId
+    (session) => session.sessionId === sessionId,
   );
 
   if (foundIndex > -1) {
@@ -194,41 +198,105 @@ async function getRealPhoneNumber(message) {
 }
 
 export async function getAiResponse(message, chat, companySlug) {
-  if (message.type === "chat" && !chat.isGroup) {
-    // Obtém o número real para autenticação (resolve LIDs)
-    const realPhoneNumber = await getRealPhoneNumber(message);
+  let isTranscibed = false;
+  let text = message.body;
+  const isNewsletter = message.from.endsWith("@newsletter");
 
-    const session = await getSession(
-      companySlug,
-      realPhoneNumber,
-      message.to,
-      message.timestamp
-    );
+  const isChatMessage = !chat.isGroup && !message.broadcast && !isNewsletter;
 
-    if (session) {
-      console.log("ID da thread: ", session.threadId);
-
+  // Para testar com um número específico, substitua pelo número desejado
+  console.log(message.from);
+  if (isChatMessage && message.from === "5518991553865@c.us") {
+    //5518991553865@c.us
+    if (message.type === "image") {
+      return {
+        success: true,
+        body: "Desculpe, mas não consigo processar imagens no momento. Por favor, envie uma mensagem de texto.",
+      };
+    } else if (message.type === "audio" || message.type === "ptt") {
+      console.log("Entrei no audio...");
       try {
-        const input = prepareInput(
-          message.body,
-          session.authToken,
-          session.userName
-        );
-        const statelessRunResult = await client.runs.wait(
-          session.threadId,
-          assistantId,
-          {
-            input: input,
-          }
-        );
+        const media = await message.downloadMedia();
+        const mediaData = media?.data;
 
-        const thread_messages = statelessRunResult["messages"];
+        if (typeof mediaData !== "string" || mediaData.trim() === "") {
+          throw new Error("Media data inválida para transcrição.");
+        }
+
+        const base64Data = mediaData.trim();
+        const isValidBase64 =
+          base64Data.length % 4 === 0 &&
+          /^[A-Za-z0-9+/]+={0,2}$/.test(base64Data);
+
+        if (!isValidBase64) {
+          throw new Error("Media data não está em base64 válido.");
+        }
+
+        console.log("Base64 data is valid. Length: ", base64Data.length);
+
+        const audioBuffer = Buffer.from(base64Data, "base64");
+        if (!audioBuffer.length) {
+          throw new Error("Buffer de áudio vazio.");
+        }
+
+        console.log("Media filename: ", media?.filename);
+
+        text = await transcribeAudio(audioBuffer, {
+          filename: media?.filename || "audio.ogg",
+        });
+
+        console.log("Transcrição obtida: ", text);
+
+        if (typeof text !== "string" || text.trim() === "") {
+          throw new Error("Transcrição vazia.");
+        }
+
+        isTranscibed = true;
+      } catch (e) {
+        console.log("Erro ao transcrever áudio: ", e.message);
         return {
           success: true,
-          body: thread_messages[thread_messages.length - 1]["content"],
+          body: "Desculpe, não consigo processar mensagens de áudio no momento. Por favor, envie uma mensagem de texto.",
         };
-      } catch (e) {
-        console.log("Erro ao comunicar com LangGraph: ", e.message);
+      }
+    }
+
+    console.log("Texto a ser processado: ", text);
+    console.log(message.type);
+    if (message.type === "chat" || isTranscibed) {
+      // Obtém o número real para autenticação (resolve LIDs)
+      const realPhoneNumber = await getRealPhoneNumber(message);
+
+      const session = await getSession(
+        companySlug,
+        realPhoneNumber,
+        message.to,
+        message.timestamp,
+      );
+
+      console.log("session: ", session);
+
+      if (session) {
+        console.log("ID da thread: ", session.threadId);
+
+        try {
+          const input = prepareInput(text, session.authToken, session.userName);
+          const statelessRunResult = await client.runs.wait(
+            session.threadId,
+            assistantId,
+            {
+              input: input,
+            },
+          );
+
+          const thread_messages = statelessRunResult["messages"];
+          return {
+            success: true,
+            body: thread_messages[thread_messages.length - 1]["content"],
+          };
+        } catch (e) {
+          console.log("Erro ao comunicar com LangGraph: ", e.message);
+        }
       }
     }
   }
