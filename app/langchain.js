@@ -206,8 +206,7 @@ export async function getAiResponse(message, chat, companySlug) {
 
   // Para testar com um número específico, substitua pelo número desejado
   console.log(message.from);
-  if (isChatMessage && message.from === "5518991553865@c.us") {
-    //5518991553865@c.us
+  if (isChatMessage) {
     if (message.type === "image") {
       return {
         success: true,
