@@ -4,7 +4,7 @@ import transcribeModule from "./transcribe.js";
 
 const { transcribeAudio } = transcribeModule;
 
-const client = new Client({ apiUrl: "http://localhost:8130" });
+const client = new Client({ apiUrl: "http://localhost:2024" });
 // Using the graph deployed with the name "agent"
 const assistantId = "fe096781-5601-53d2-b2f6-0d3403f7e9ca";
 
@@ -208,8 +208,14 @@ export async function getAiResponse(message, chat, companySlug) {
   let isTranscibed = false;
   let text = message.body;
   const isNewsletter = message.from.endsWith("@newsletter");
+  const isBroadcast = message.from.endsWith("@broadcast");
 
-  const isChatMessage = !chat.isGroup && !message.broadcast && !isNewsletter;
+  const isChatMessage =
+    !chat.isGroup &&
+    !message.isStatus &&
+    !message.broadcast &&
+    !isBroadcast &&
+    !isNewsletter;
 
   // Para testar com um número específico, substitua pelo número desejado
   console.log(message.from);
