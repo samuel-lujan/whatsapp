@@ -12,31 +12,33 @@ const CHAT_CACHE = [];
 
 const APP_TOKEN = process.env.APP_TOKEN;
 const BETA_HASH = process.env.BETA_HASH;
+const BETA_HASH_2 = process.env.BETA_HASH_2;
 const TRANSCRIPTION = process.env.TRANSCRIPTION === "true";
 
 function getApiUrl(companySlug) {
   switch (companySlug) {
+    case "studio-homolog":
+      return "https://homolog.samuellujan.com.br/api";
+    case "lesma":
+      return "https://homolog.samuellujan.com.br/api";
     default:
       return "https://www.jusilveiraspinning.com.br/api";
   }
 }
 
-async function cellphoneLogin(companySlug, cellphone) {
-  const url = getApiUrl(companySlug);
+async function cellphoneLogin(url, cellphone) {
   const cleanedCellphone = clearCellphone(cellphone);
   const loginData = await postLogin(url, { cellphone: cleanedCellphone });
 
   return loginData.token;
 }
 
-async function getNameAndPermissions(companySlug, token) {
-  const url = getApiUrl(companySlug);
+async function getNameAndPermissions(url, token) {
   const userData = await getUser(url, token);
 
   return {
     name: userData.name,
-    is_in_ai_white_list: userData.is_in_ai_white_list,
-    is_able_to_schedule_from_ai: userData.is_able_to_schedule_from_ai,
+    is_able_to_ai_response: userData.is_able_to_ai_response,
   };
 }
 
@@ -95,7 +97,7 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
     .digest("hex");
 
   console.log("Receiver hash: ", receiver_hash);
-  if (receiver_hash != BETA_HASH) {
+  if (receiver_hash != BETA_HASH && receiver_hash != BETA_HASH_2) {
     return null;
   }
 
@@ -126,9 +128,12 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
   }
 
   try {
-    const authToken = await cellphoneLogin(companySlug, msgFrom);
-    const user = await getNameAndPermissions(companySlug, authToken);
-    if (user.is_in_ai_white_list) {
+    const apiUrl = getApiUrl(companySlug);
+    const authToken = await cellphoneLogin(apiUrl, msgFrom);
+    const user = await getNameAndPermissions(apiUrl, authToken);
+    console.log(authToken);
+    console.log(user);
+    if (user.is_able_to_ai_response) {
       console.log(`Criando nova sessão. [${sessionId}].`);
       const thread = await client.threads.create({
         metadata: { sessionId: sessionId },
@@ -144,8 +149,8 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
         authToken: authToken,
         lastUpdate: msgTimestamp,
         userName: user.name,
-        isWhiteList: user.is_in_ai_white_list,
-        isAbleToSchedule: user.is_able_to_schedule_from_ai,
+        isAbleToAiResponse: user.is_able_to_ai_response,
+        apiUrl: apiUrl,
       };
 
       CHAT_CACHE.push(newSession);
@@ -172,11 +177,12 @@ async function findThread(sessionId) {
   return threads;
 }
 
-function prepareInput(message, token, name) {
+function prepareInput(message, token, name, url) {
   return {
     messages: [{ role: "user", content: message }],
     auth_token: token,
     user_name: name,
+    api_url: url,
   };
 }
 
@@ -286,7 +292,12 @@ export async function getAiResponse(message, chat, companySlug) {
         console.log("ID da thread: ", session.threadId);
 
         try {
-          const input = prepareInput(text, session.authToken, session.userName);
+          const input = prepareInput(
+            text,
+            session.authToken,
+            session.userName,
+            session.apiUrl,
+          );
           const statelessRunResult = await client.runs.wait(
             session.threadId,
             assistantId,
