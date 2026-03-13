@@ -1,5 +1,8 @@
 import { Client } from "@langchain/langgraph-sdk";
 import crypto from "crypto";
+import transcribeModule from "./transcribe.js";
+
+const { transcribeAudio } = transcribeModule;
 
 const client = new Client({ apiUrl: "http://localhost:8130" });
 // Using the graph deployed with the name "agent"
@@ -9,30 +12,33 @@ const CHAT_CACHE = [];
 
 const APP_TOKEN = process.env.APP_TOKEN;
 const BETA_HASH = process.env.BETA_HASH;
+const BETA_HASH_2 = process.env.BETA_HASH_2;
+const TRANSCRIPTION = process.env.TRANSCRIPTION === "true";
 
 function getApiUrl(companySlug) {
   switch (companySlug) {
+    case "studio-homolog":
+      return "https://homolog.samuellujan.com.br/api";
+    case "lesma":
+      return "https://homolog.samuellujan.com.br/api";
     default:
       return "https://www.jusilveiraspinning.com.br/api";
   }
 }
 
-async function cellphoneLogin(companySlug, cellphone) {
-  const url = getApiUrl(companySlug);
+async function cellphoneLogin(url, cellphone) {
   const cleanedCellphone = clearCellphone(cellphone);
   const loginData = await postLogin(url, { cellphone: cleanedCellphone });
 
   return loginData.token;
 }
 
-async function getNameAndPermissions(companySlug, token) {
-  const url = getApiUrl(companySlug);
+async function getNameAndPermissions(url, token) {
   const userData = await getUser(url, token);
 
   return {
     name: userData.name,
-    is_in_ai_white_list: userData.is_in_ai_white_list,
-    is_able_to_schedule_from_ai: userData.is_able_to_schedule_from_ai,
+    is_able_to_ai_response: userData.is_able_to_ai_response,
   };
 }
 
@@ -48,7 +54,7 @@ async function getUser(url, token) {
 
   if (!response.ok) {
     throw new Error(
-      `Erro ao buscar info do telefone ${body.cellphone}, Status: ${response.status}`
+      `Erro ao buscar info do telefone ${body.cellphone}, Status: ${response.status}`,
     );
   }
 
@@ -68,7 +74,7 @@ async function postLogin(url, body) {
 
   if (!response.ok) {
     throw new Error(
-      `Erro ao tentar logar com número de telefone ${body.cellphone}, Status: ${response.status}`
+      `Erro ao tentar logar com número de telefone ${body.cellphone}, Status: ${response.status}`,
     );
   }
 
@@ -90,7 +96,8 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
     .update(`${msgTo}`, "utf8")
     .digest("hex");
 
-  if (receiver_hash != BETA_HASH) {
+  console.log("Receiver hash: ", receiver_hash);
+  if (receiver_hash != BETA_HASH && receiver_hash != BETA_HASH_2) {
     return null;
   }
 
@@ -100,7 +107,7 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
     .digest("hex");
 
   const foundIndex = CHAT_CACHE.findIndex(
-    (session) => session.sessionId === sessionId
+    (session) => session.sessionId === sessionId,
   );
 
   if (foundIndex > -1) {
@@ -121,9 +128,12 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
   }
 
   try {
-    const authToken = await cellphoneLogin(companySlug, msgFrom);
-    const user = await getNameAndPermissions(companySlug, authToken);
-    if (user.is_in_ai_white_list) {
+    const apiUrl = getApiUrl(companySlug);
+    const authToken = await cellphoneLogin(apiUrl, msgFrom);
+    const user = await getNameAndPermissions(apiUrl, authToken);
+    console.log(authToken);
+    console.log(user);
+    if (user.is_able_to_ai_response) {
       console.log(`Criando nova sessão. [${sessionId}].`);
       const thread = await client.threads.create({
         metadata: { sessionId: sessionId },
@@ -139,8 +149,8 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
         authToken: authToken,
         lastUpdate: msgTimestamp,
         userName: user.name,
-        isWhiteList: user.is_in_ai_white_list,
-        isAbleToSchedule: user.is_able_to_schedule_from_ai,
+        isAbleToAiResponse: user.is_able_to_ai_response,
+        apiUrl: apiUrl,
       };
 
       CHAT_CACHE.push(newSession);
@@ -167,11 +177,12 @@ async function findThread(sessionId) {
   return threads;
 }
 
-function prepareInput(message, token, name) {
+function prepareInput(message, token, name, url) {
   return {
     messages: [{ role: "user", content: message }],
     auth_token: token,
     user_name: name,
+    api_url: url,
   };
 }
 
@@ -194,41 +205,115 @@ async function getRealPhoneNumber(message) {
 }
 
 export async function getAiResponse(message, chat, companySlug) {
-  if (message.type === "chat" && !chat.isGroup) {
-    // Obtém o número real para autenticação (resolve LIDs)
-    const realPhoneNumber = await getRealPhoneNumber(message);
+  let isTranscibed = false;
+  let text = message.body;
+  const isNewsletter = message.from.endsWith("@newsletter");
 
-    const session = await getSession(
-      companySlug,
-      realPhoneNumber,
-      message.to,
-      message.timestamp
-    );
+  const isChatMessage = !chat.isGroup && !message.broadcast && !isNewsletter;
 
-    if (session) {
-      console.log("ID da thread: ", session.threadId);
-
-      try {
-        const input = prepareInput(
-          message.body,
-          session.authToken,
-          session.userName
-        );
-        const statelessRunResult = await client.runs.wait(
-          session.threadId,
-          assistantId,
-          {
-            input: input,
-          }
-        );
-
-        const thread_messages = statelessRunResult["messages"];
+  // Para testar com um número específico, substitua pelo número desejado
+  console.log(message.from);
+  if (isChatMessage) {
+    if (message.type === "image") {
+      return {
+        success: true,
+        body: "Desculpe, mas não consigo processar imagens no momento. Por favor, envie uma mensagem de texto.",
+      };
+    } else if (message.type === "audio" || message.type === "ptt") {
+      if (!TRANSCRIPTION) {
         return {
           success: true,
-          body: thread_messages[thread_messages.length - 1]["content"],
+          body: "Desculpe, não consigo processar mensagens de áudio no momento. Por favor, envie uma mensagem de texto.",
         };
+      }
+
+      try {
+        const media = await message.downloadMedia();
+        const mediaData = media?.data;
+
+        if (typeof mediaData !== "string" || mediaData.trim() === "") {
+          throw new Error("Media data inválida para transcrição.");
+        }
+
+        const base64Data = mediaData.trim();
+        const isValidBase64 =
+          base64Data.length % 4 === 0 &&
+          /^[A-Za-z0-9+/]+={0,2}$/.test(base64Data);
+
+        if (!isValidBase64) {
+          throw new Error("Media data não está em base64 válido.");
+        }
+
+        console.log("Base64 data is valid. Length: ", base64Data.length);
+
+        const audioBuffer = Buffer.from(base64Data, "base64");
+        if (!audioBuffer.length) {
+          throw new Error("Buffer de áudio vazio.");
+        }
+
+        console.log("Media filename: ", media?.filename);
+
+        text = await transcribeAudio(audioBuffer, {
+          filename: media?.filename || "audio.ogg",
+        });
+
+        console.log("Transcrição obtida: ", text);
+
+        if (typeof text !== "string" || text.trim() === "") {
+          throw new Error("Transcrição vazia.");
+        }
+
+        isTranscibed = true;
       } catch (e) {
-        console.log("Erro ao comunicar com LangGraph: ", e.message);
+        console.log("Erro ao transcrever áudio: ", e.message);
+        return {
+          success: true,
+          body: "Desculpe, Houve um erro analisando seu áudio. Por favor, envie uma mensagem de texto.",
+        };
+      }
+    }
+
+    console.log("Texto a ser processado: ", text);
+    console.log(message.type);
+    if (message.type === "chat" || isTranscibed) {
+      // Obtém o número real para autenticação (resolve LIDs)
+      const realPhoneNumber = await getRealPhoneNumber(message);
+
+      const session = await getSession(
+        companySlug,
+        realPhoneNumber,
+        message.to,
+        message.timestamp,
+      );
+
+      console.log("session: ", session);
+
+      if (session) {
+        console.log("ID da thread: ", session.threadId);
+
+        try {
+          const input = prepareInput(
+            text,
+            session.authToken,
+            session.userName,
+            session.apiUrl,
+          );
+          const statelessRunResult = await client.runs.wait(
+            session.threadId,
+            assistantId,
+            {
+              input: input,
+            },
+          );
+
+          const thread_messages = statelessRunResult["messages"];
+          return {
+            success: true,
+            body: thread_messages[thread_messages.length - 1]["content"],
+          };
+        } catch (e) {
+          console.log("Erro ao comunicar com LangGraph: ", e.message);
+        }
       }
     }
   }
