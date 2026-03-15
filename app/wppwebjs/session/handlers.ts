@@ -5,20 +5,6 @@ import { PERMANENT_FAILURE_REASONS, RECONNECT_CONFIG } from "./config";
 import { sessions } from "./sessions";
 import { raceWithTimeout } from "../../utils";
 
-export function shouldAutoReconnect(reason: string): boolean {
-  if (typeof reason === "string") {
-    return !PERMANENT_FAILURE_REASONS.includes(reason);
-  }
-  return true;
-}
-
-export function getReconnectDelay(attempt: number): number {
-  const delay =
-    RECONNECT_CONFIG.initialDelayMs *
-    Math.pow(RECONNECT_CONFIG.backoffMultiplier, attempt);
-  return Math.min(delay, RECONNECT_CONFIG.maxDelayMs);
-}
-
 export async function safeDestroyClient(companySlug: string): Promise<void> {
   const session = sessions[companySlug];
   if (!session || !session.client) {
@@ -116,7 +102,10 @@ export async function scheduleReconnect(
     return;
   }
 
-  const delay = getReconnectDelay(attempt);
+  const attempt_delay =
+    RECONNECT_CONFIG.initialDelayMs *
+    Math.pow(RECONNECT_CONFIG.backoffMultiplier, attempt);
+  const delay = Math.min(attempt_delay, RECONNECT_CONFIG.maxDelayMs);
   console.log(
     `[RECONNECT] ${companySlug}: tentativa ${attempt + 1}/${RECONNECT_CONFIG.maxAttempts} em ${delay / 1000}s (motivo: ${reason})`,
   );
@@ -191,7 +180,14 @@ export function onDisconnected(companySlug: string) {
     sessions[companySlug].lastDisconnectTime = Date.now();
     sessions[companySlug].lastDisconnectReason = reason;
 
-    if (shouldAutoReconnect(reason)) {
+    const shouldReconect = (reason) => {
+      if (typeof reason === "string") {
+        return !PERMANENT_FAILURE_REASONS.includes(reason);
+      }
+      return true;
+    }
+
+    if (shouldReconect(reason)) {
       await scheduleReconnect(companySlug, reason);
     } else {
       console.log(
