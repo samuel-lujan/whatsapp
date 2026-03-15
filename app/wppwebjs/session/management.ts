@@ -12,13 +12,6 @@ import { findCorrectChatId } from "../number-utils";
 import { sessions } from "./sessions";
 import { raceWithTimeout } from "../../utils";
 
-export function getClient(companySlug: string): Client | null {
-  if (sessions[companySlug] && sessions[companySlug].ready) {
-    return sessions[companySlug].client;
-  }
-  return null;
-}
-
 export async function clearSession(companySlug: string): Promise<ClearResult> {
   if (!sessions[companySlug]) {
     console.log(`[CLEAR] Sessao ${companySlug} nao existe`);
