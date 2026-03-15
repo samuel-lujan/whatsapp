@@ -297,28 +297,43 @@ export function onMessage(companySlug: string, client: Client) {
         `📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`,
       );
 
-      const chat = await message.getChat();
-      const aiResponse = await getAiResponse(message, chat, companySlug);
+      const isNewsletter = message.from.endsWith("@newsletter");
 
-      if (aiResponse.success) {
-        await raceWithTimeout(
-          client.sendMessage(message.from, aiResponse.body!),
-          15000,
-          "Timeout ao enviar mensagem - cliente pode ter desconectado",
-        );
-        console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`);
-      } else {
-        if (typeof chat.markUnread === "function") {
-          await chat.markUnread();
-          console.log(
-            `ℹ️ Mensagem marcada como não lida para atendimento humano - ${companySlug}`,
+      const isChatMessage = !message.isStatus && !message.broadcast && !isNewsletter;
+      if (!isChatMessage) {
+        console.log(`⚠️ Ignorando mensagem de tipo ${message.type} de ${message.from}`);
+        return;
+      }
+      
+      const shouldRespond = message.from.endsWith("@g.us");
+      
+      if (shouldRespond) {
+      
+        const aiResponse = await getAiResponse(message, companySlug);
+
+        if (aiResponse.success) {
+          await raceWithTimeout(
+            client.sendMessage(message.from, aiResponse.body!),
+            15000,
+            "Timeout ao enviar mensagem - cliente pode ter desconectado",
           );
-        } else {
-          console.log(
-            `ℹ️ Sem resposta da IA para ${companySlug}, método markUnread não disponível nesta versão`,
-          );
+          console.log(`✅ Mensagem enviada com sucesso pelo cliente ${companySlug}`);
+          return;
         }
       }
+
+      const chat = await message.getChat();
+      if (typeof chat.markUnread === "function") {
+        await chat.markUnread();
+        console.log(
+          `ℹ️ Mensagem marcada como não lida para atendimento humano - ${companySlug}`,
+        );
+      } else {
+        console.log(
+          `ℹ️ Sem resposta da IA para ${companySlug}, método markUnread não disponível nesta versão`,
+        );
+      }
+
     } catch (error) {
       console.error(
         `❌ Erro ao processar mensagem para ${companySlug}:`,

@@ -238,128 +238,116 @@ async function getRealPhoneNumber(message: Message): Promise<string> {
 
 export async function getAiResponse(
   message: Message,
-  chat: Chat,
   companySlug: string
 ): Promise<AiResponse> {
   let isTranscibed = false;
   let text = message.body;
-  const isNewsletter = message.from.endsWith("@newsletter");
-  const isBroadcast = message.from.endsWith("@broadcast");
-
-  const isChatMessage =
-    !chat.isGroup &&
-    !message.isStatus &&
-    !message.broadcast &&
-    !isBroadcast &&
-    !isNewsletter;
 
   // Para testar com um número específico, substitua pelo número desejado
   console.log(message.from);
-  if (isChatMessage) {
-    if (message.type === "image") {
+  if (message.type === "image") {
+    return {
+      success: true,
+      body: "Desculpe, mas não consigo processar imagens no momento. Por favor, envie uma mensagem de texto.",
+    };
+  } else if (message.type === "audio" || message.type === "ptt") {
+    if (!TRANSCRIPTION) {
       return {
         success: true,
-        body: "Desculpe, mas não consigo processar imagens no momento. Por favor, envie uma mensagem de texto.",
+        body: "Desculpe, não consigo processar mensagens de áudio no momento. Por favor, envie uma mensagem de texto.",
       };
-    } else if (message.type === "audio" || message.type === "ptt") {
-      if (!TRANSCRIPTION) {
-        return {
-          success: true,
-          body: "Desculpe, não consigo processar mensagens de áudio no momento. Por favor, envie uma mensagem de texto.",
-        };
-      }
-
-      try {
-        const media = await message.downloadMedia();
-        const mediaData = media?.data;
-
-        if (typeof mediaData !== "string" || mediaData.trim() === "") {
-          throw new Error("Media data inválida para transcrição.");
-        }
-
-        const base64Data = mediaData.trim();
-        const isValidBase64 =
-          base64Data.length % 4 === 0 &&
-          /^[A-Za-z0-9+/]+={0,2}$/.test(base64Data);
-
-        if (!isValidBase64) {
-          throw new Error("Media data não está em base64 válido.");
-        }
-
-        console.log("Base64 data is valid. Length: ", base64Data.length);
-
-        const audioBuffer = Buffer.from(base64Data, "base64");
-        if (!audioBuffer.length) {
-          throw new Error("Buffer de áudio vazio.");
-        }
-
-        console.log("Media filename: ", media?.filename);
-
-        text = await transcribeAudio(audioBuffer, {
-          filename: media?.filename || "audio.ogg",
-        });
-
-        console.log("Transcrição obtida: ", text);
-
-        if (typeof text !== "string" || text.trim() === "") {
-          throw new Error("Transcrição vazia.");
-        }
-
-        isTranscibed = true;
-      } catch (e) {
-        console.log("Erro ao transcrever áudio: ", (e as Error).message);
-        return {
-          success: true,
-          body: "Desculpe, Houve um erro analisando seu áudio. Por favor, envie uma mensagem de texto.",
-        };
-      }
     }
 
-    console.log("Texto a ser processado: ", text);
-    console.log(message.type);
-    if (message.type === "chat" || isTranscibed) {
-      // Obtém o número real para autenticação (resolve LIDs)
-      const realPhoneNumber = await getRealPhoneNumber(message);
+    try {
+      const media = await message.downloadMedia();
+      const mediaData = media?.data;
 
-      const session = await getSession(
-        companySlug,
-        realPhoneNumber,
-        message.to,
-        message.timestamp,
-      );
+      if (typeof mediaData !== "string" || mediaData.trim() === "") {
+        throw new Error("Media data inválida para transcrição.");
+      }
 
-      console.log("session: ", session);
+      const base64Data = mediaData.trim();
+      const isValidBase64 =
+        base64Data.length % 4 === 0 &&
+        /^[A-Za-z0-9+/]+={0,2}$/.test(base64Data);
 
-      if (session) {
-        console.log("ID da thread: ", session.threadId);
+      if (!isValidBase64) {
+        throw new Error("Media data não está em base64 válido.");
+      }
 
-        try {
-          const input = prepareInput(
-            text,
-            session.authToken,
-            session.userName,
-            session.apiUrl,
-          );
-          const statelessRunResult = (await client.runs.wait(
-            session.threadId,
-            assistantId,
-            {
-              input: input,
-            },
-          )) as Record<string, unknown>;
+      console.log("Base64 data is valid. Length: ", base64Data.length);
 
-          const thread_messages = statelessRunResult[
-            "messages"
-          ] as Array<Record<string, unknown>>;
-          return {
-            success: true,
-            body: thread_messages[thread_messages.length - 1][
-              "content"
-            ] as string,
-          };
-        } catch (e) {
-          console.log("Erro ao comunicar com LangGraph: ", (e as Error).message);
-        }
+      const audioBuffer = Buffer.from(base64Data, "base64");
+      if (!audioBuffer.length) {
+        throw new Error("Buffer de áudio vazio.");
+      }
+
+      console.log("Media filename: ", media?.filename);
+
+      text = await transcribeAudio(audioBuffer, {
+        filename: media?.filename || "audio.ogg",
+      });
+
+      console.log("Transcrição obtida: ", text);
+
+      if (typeof text !== "string" || text.trim() === "") {
+        throw new Error("Transcrição vazia.");
+      }
+
+      isTranscibed = true;
+    } catch (e) {
+      console.log("Erro ao transcrever áudio: ", (e as Error).message);
+      return {
+        success: true,
+        body: "Desculpe, Houve um erro analisando seu áudio. Por favor, envie uma mensagem de texto.",
+      };
+    }
+  }
+
+  console.log("Texto a ser processado: ", text);
+  console.log(message.type);
+  if (message.type === "chat" || isTranscibed) {
+    // Obtém o número real para autenticação (resolve LIDs)
+    const realPhoneNumber = await getRealPhoneNumber(message);
+
+    const session = await getSession(
+      companySlug,
+      realPhoneNumber,
+      message.to,
+      message.timestamp,
+    );
+
+    console.log("session: ", session);
+
+    if (session) {
+      console.log("ID da thread: ", session.threadId);
+
+      try {
+        const input = prepareInput(
+          text,
+          session.authToken,
+          session.userName,
+          session.apiUrl,
+        );
+        const statelessRunResult = (await client.runs.wait(
+          session.threadId,
+          assistantId,
+          {
+            input: input,
+          },
+        )) as Record<string, unknown>;
+
+        const thread_messages = statelessRunResult[
+          "messages"
+        ] as Array<Record<string, unknown>>;
+        return {
+          success: true,
+          body: thread_messages[thread_messages.length - 1][
+            "content"
+          ] as string,
+        };
+      } catch (e) {
+        console.log("Erro ao comunicar com LangGraph: ", (e as Error).message);
       }
     }
   }
