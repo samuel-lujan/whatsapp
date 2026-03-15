@@ -7,7 +7,7 @@ import type {
   ClearResult,
   DeleteAllResult,
 } from "../interfaces";
-import { safeDestroyClient } from "./lifecycle";
+import { safeDestroyClient } from "./client";
 import { findCorrectChatId } from "../number-utils";
 import { sessions } from "./sessions";
 import { raceWithTimeout } from "../../utils";
