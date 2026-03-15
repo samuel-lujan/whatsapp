@@ -4,8 +4,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon --exec node --trace-warnings ./app/index.js",
-    "start": "node ./app/index.js"
+    "dev": "nodemon --exec tsx --trace-warnings ./app/index.ts",
+    "start": "tsx ./app/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +24,11 @@
     "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "@types/qrcode": "^1.5.6",
+    "nodemon": "^3.1.10",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

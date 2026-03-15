@@ -1,21 +1,44 @@
 import { Client } from "@langchain/langgraph-sdk";
 import crypto from "crypto";
-import transcribeModule from "./transcribe.js";
-
-const { transcribeAudio } = transcribeModule;
+import { transcribeAudio } from "./transcribe";
+import type { Message, Chat } from "whatsapp-web.js";
 
 const client = new Client({ apiUrl: "http://localhost:2024" });
 // Using the graph deployed with the name "agent"
 const assistantId = "fe096781-5601-53d2-b2f6-0d3403f7e9ca";
 
-const CHAT_CACHE = [];
+interface Session {
+  sessionId: string;
+  threadId: string;
+  authToken: string;
+  lastUpdate: number;
+  userName: string;
+  isAbleToAiResponse: boolean;
+  apiUrl: string;
+}
+
+interface UserData {
+  name: string;
+  is_able_to_ai_response: boolean;
+}
+
+interface LoginData {
+  token: string;
+}
+
+interface AiResponse {
+  success: boolean;
+  body?: string;
+}
+
+const CHAT_CACHE: Session[] = [];
 
 const APP_TOKEN = process.env.APP_TOKEN;
 const BETA_HASH = process.env.BETA_HASH;
 const BETA_HASH_2 = process.env.BETA_HASH_2;
 const TRANSCRIPTION = process.env.TRANSCRIPTION === "true";
 
-function getApiUrl(companySlug) {
+function getApiUrl(companySlug: string): string {
   switch (companySlug) {
     case "studio-homolog":
       return "https://homolog.samuellujan.com.br/api";
@@ -26,23 +49,24 @@ function getApiUrl(companySlug) {
   }
 }
 
-async function cellphoneLogin(url, cellphone) {
+async function cellphoneLogin(url: string, cellphone: string): Promise<string> {
   const cleanedCellphone = clearCellphone(cellphone);
   const loginData = await postLogin(url, { cellphone: cleanedCellphone });
-
   return loginData.token;
 }
 
-async function getNameAndPermissions(url, token) {
+async function getNameAndPermissions(
+  url: string,
+  token: string
+): Promise<{ name: string; is_able_to_ai_response: boolean }> {
   const userData = await getUser(url, token);
-
   return {
     name: userData.name,
     is_able_to_ai_response: userData.is_able_to_ai_response,
   };
 }
 
-async function getUser(url, token) {
+async function getUser(url: string, token: string): Promise<UserData> {
   const response = await fetch(`${url}/user`, {
     method: "GET",
     headers: {
@@ -54,14 +78,17 @@ async function getUser(url, token) {
 
   if (!response.ok) {
     throw new Error(
-      `Erro ao buscar info do telefone ${body.cellphone}, Status: ${response.status}`,
+      `Erro ao buscar info do usuário. Status: ${response.status}`,
     );
   }
 
-  return await response.json();
+  return (await response.json()) as UserData;
 }
 
-async function postLogin(url, body) {
+async function postLogin(
+  url: string,
+  body: { cellphone: string }
+): Promise<LoginData> {
   const response = await fetch(`${url}/login`, {
     method: "POST",
     headers: {
@@ -78,10 +105,10 @@ async function postLogin(url, body) {
     );
   }
 
-  return await response.json();
+  return (await response.json()) as LoginData;
 }
 
-function clearCellphone(cellphone) {
+function clearCellphone(cellphone: string): string {
   let cleanedCellphone = cellphone.replace(/\D/g, "");
   if (cleanedCellphone.startsWith("55")) {
     cleanedCellphone = cleanedCellphone.slice(2);
@@ -90,7 +117,12 @@ function clearCellphone(cellphone) {
   return cleanedCellphone;
 }
 
-async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
+async function getSession(
+  companySlug: string,
+  msgFrom: string,
+  msgTo: string,
+  msgTimestamp: number
+): Promise<Session | null> {
   const receiver_hash = crypto
     .createHash("sha256")
     .update(`${msgTo}`, "utf8")
@@ -120,7 +152,6 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
       console.log("Achei sessão em andamento para o ID: ", sessionId);
       const session = CHAT_CACHE[foundIndex];
       session.lastUpdate = msgTimestamp;
-
       return session;
     }
   } else {
@@ -143,7 +174,7 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
         throw new Error("Thread não foi criada!");
       }
 
-      const newSession = {
+      const newSession: Session = {
         sessionId: sessionId,
         threadId: thread.thread_id,
         authToken: authToken,
@@ -163,21 +194,22 @@ async function getSession(companySlug, msgFrom, msgTo, msgTimestamp) {
       console.log("Número sem permissão para IA.");
     }
   } catch (e) {
-    console.log(e.message);
+    console.log((e as Error).message);
   }
   return null;
 }
 
-async function findThread(sessionId) {
-  const threads = await client.threads.search({
-    metadata: { sessionId: sessionId },
-    limit: 1,
-  });
-
-  return threads;
-}
-
-function prepareInput(message, token, name, url) {
+function prepareInput(
+  message: string,
+  token: string,
+  name: string,
+  url: string
+): {
+  messages: Array<{ role: string; content: string }>;
+  auth_token: string;
+  user_name: string;
+  api_url: string;
+} {
   return {
     messages: [{ role: "user", content: message }],
     auth_token: token,
@@ -186,7 +218,7 @@ function prepareInput(message, token, name, url) {
   };
 }
 
-async function getRealPhoneNumber(message) {
+async function getRealPhoneNumber(message: Message): Promise<string> {
   // Se for LID, precisamos obter o número real do contato
   if (message.from.endsWith("@lid")) {
     try {
@@ -197,14 +229,18 @@ async function getRealPhoneNumber(message) {
         return contact.number;
       }
     } catch (e) {
-      console.error("Erro ao obter contato do LID:", e.message);
+      console.error("Erro ao obter contato do LID:", (e as Error).message);
     }
   }
   // Se não for LID ou não conseguir obter, usa o from original
   return message.from;
 }
 
-export async function getAiResponse(message, chat, companySlug) {
+export async function getAiResponse(
+  message: Message,
+  chat: Chat,
+  companySlug: string
+): Promise<AiResponse> {
   let isTranscibed = false;
   let text = message.body;
   const isNewsletter = message.from.endsWith("@newsletter");
@@ -271,7 +307,7 @@ export async function getAiResponse(message, chat, companySlug) {
 
         isTranscibed = true;
       } catch (e) {
-        console.log("Erro ao transcrever áudio: ", e.message);
+        console.log("Erro ao transcrever áudio: ", (e as Error).message);
         return {
           success: true,
           body: "Desculpe, Houve um erro analisando seu áudio. Por favor, envie uma mensagem de texto.",
@@ -304,21 +340,25 @@ export async function getAiResponse(message, chat, companySlug) {
             session.userName,
             session.apiUrl,
           );
-          const statelessRunResult = await client.runs.wait(
+          const statelessRunResult = (await client.runs.wait(
             session.threadId,
             assistantId,
             {
               input: input,
             },
-          );
+          )) as Record<string, unknown>;
 
-          const thread_messages = statelessRunResult["messages"];
+          const thread_messages = statelessRunResult[
+            "messages"
+          ] as Array<Record<string, unknown>>;
           return {
             success: true,
-            body: thread_messages[thread_messages.length - 1]["content"],
+            body: thread_messages[thread_messages.length - 1][
+              "content"
+            ] as string,
           };
         } catch (e) {
-          console.log("Erro ao comunicar com LangGraph: ", e.message);
+          console.log("Erro ao comunicar com LangGraph: ", (e as Error).message);
         }
       }
     }
