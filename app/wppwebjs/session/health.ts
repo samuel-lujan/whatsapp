@@ -1,7 +1,7 @@
 import type { WAState } from "whatsapp-web.js";
 import { HEALTH_CHECK_INTERVAL_MS } from "./config";
 import type { HealthResult } from "../interfaces";
-import { safeDestroyClient, scheduleReconnect } from "./client";
+import { safeDestroyClient, scheduleReconnect } from "./handlers";
 import { sessions } from "./sessions";
 import { raceWithTimeout } from "../../utils";
 

@@ -1,6 +1,8 @@
 import type { WAState } from "whatsapp-web.js";
 import type { ConnectionStatus, StatusResult } from "../interfaces";
-import { createSession, safeDestroyClient, waitForQrCode } from "./client";
+import { createSession } from "./client";
+import { waitForQrCode } from "./handlers";
+import { safeDestroyClient } from "./handlers";
 import { sessions } from "./sessions";
 import { raceWithTimeout } from "../../utils";
 
