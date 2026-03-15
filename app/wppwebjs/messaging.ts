@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { AppError, SendResult } from "./interfaces";
 import { verifyClientHealth } from "./session/health";
-import { safeDestroyClient } from "./session/lifecycle";
+import { safeDestroyClient } from "./session/handlers";
 import { validateWhatsAppNumber } from "./number-utils";
 import { sessions } from "./session/sessions";
 
