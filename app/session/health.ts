@@ -1,6 +1,6 @@
 import type { WAState } from "whatsapp-web.js";
 import { HEALTH_CHECK_INTERVAL_MS } from ".";
-import type { HealthResult } from "../wppwebjs/types";
+import type { HealthResult } from "../types";
 import { safeDestroyClient, scheduleReconnect } from "./handlers";
 import { sessions } from ".";
 import { raceWithTimeout } from "../utils";
@@ -128,7 +128,7 @@ export async function verifyClientHealth(companySlug: string): Promise<HealthRes
     }
 }
 
-async function zombieSessionMonitor(): Promise<void> {
+export async function zombieSessionMonitor(): Promise<void> {
     const slugs = Object.keys(sessions);
     if (slugs.length === 0) return;
 
@@ -187,5 +187,3 @@ async function zombieSessionMonitor(): Promise<void> {
         }
     }
 }
-
-setInterval(zombieSessionMonitor, HEALTH_CHECK_INTERVAL_MS);

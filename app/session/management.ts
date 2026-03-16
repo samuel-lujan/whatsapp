@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import type { Client } from "whatsapp-web.js";
-import type { ChatIdResult, ClearAllResult, ClearResult, DeleteAllResult } from "../wppwebjs/types";
+import type { ChatIdResult, ClearAllResult, ClearResult, DeleteAllResult } from "../types";
 import { safeDestroyClient } from "./handlers";
 import { findCorrectChatId } from "../wppwebjs/number-utils";
 import { sessions } from ".";

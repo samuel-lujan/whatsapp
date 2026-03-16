@@ -1,8 +1,7 @@
 import fs from "fs";
 import path from "path";
-import type { AppError, SendResult } from "./types";
-import { verifyClientHealth } from "../session/health";
-import { safeDestroyClient } from "../session/handlers";
+import type { AppError, SendResult } from "../types";
+import { verifyClientHealth, safeDestroyClient } from "../session";
 import { validateWhatsAppNumber } from "./number-utils";
 import { sessions } from "../session";
 

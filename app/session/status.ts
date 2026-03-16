@@ -1,7 +1,7 @@
 import { execSync } from "child_process";
 import type { WAState } from "whatsapp-web.js";
 import { Client, LocalAuth } from "whatsapp-web.js";
-import type { ConnectionStatus, StatusResult } from "../wppwebjs/types";
+import type { ConnectionStatus, StatusResult } from "../types";
 import {
     onQr,
     onAuthenticated,

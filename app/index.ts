@@ -5,6 +5,7 @@ import express from "express";
 import Rollbar from "rollbar";
 import { execSync } from "child_process";
 import * as whatsapp from "./wppwebjs";
+import * as sessionManagement from "./session";
 import { createRouter } from "./routes";
 import { raceWithTimeout } from "./utils";
 
@@ -53,7 +54,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     console.log(`\n[SHUTDOWN] Recebido ${signal}, limpando todas as sessoes...`);
 
     try {
-        await raceWithTimeout(whatsapp.clearAllSessions(), 30000, "shutdown timeout");
+        await raceWithTimeout(sessionManagement.clearAllSessions(), 30000, "shutdown timeout");
         console.log(`[SHUTDOWN] Sessoes limpas com sucesso`);
     } catch (err: any) {
         console.log(`[SHUTDOWN] Erro/timeout na limpeza: ${err.message}`);

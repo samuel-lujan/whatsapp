@@ -1,4 +1,5 @@
-import type { SessionState } from "../wppwebjs/types";
+import type { SessionState } from "../types";
+import { zombieSessionMonitor } from "./health";
 
 // === Configuracao de reconnect ===
 export const HEALTH_CHECK_INTERVAL_MS = 60000; // 1 minuto
@@ -21,6 +22,9 @@ export const PERMANENT_FAILURE_REASONS = [
 
 export const sessions: Record<string, SessionState> = {};
 
+setInterval(zombieSessionMonitor, HEALTH_CHECK_INTERVAL_MS);
+
 export * from "./status";
 export * from "./health";
+export * from "./handlers";
 export * from "./management";
