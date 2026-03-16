@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import Rollbar from "rollbar";
-import * as whatsapp from "./wppwebjs/whatsapp";
+import * as whatsapp from "./wppwebjs";
 import qrcodeTerminal from "qrcode-terminal";
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "sua-chave-secreta-aqui";

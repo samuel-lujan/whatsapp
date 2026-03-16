@@ -4,7 +4,7 @@ dotenv.config();
 import express from "express";
 import Rollbar from "rollbar";
 import { execSync } from "child_process";
-import * as whatsapp from "./wppwebjs/whatsapp";
+import * as whatsapp from "./wppwebjs";
 import { createRouter } from "./routes";
 import { raceWithTimeout } from "./utils";
 
