@@ -1,5 +1,5 @@
 import type { Client } from "whatsapp-web.js";
-import type { ChatIdResult, ValidationResult } from "./interfaces";
+import type { ChatIdResult, ValidationResult } from "./types";
 
 export async function findCorrectChatId(client: Client, number: string): Promise<ChatIdResult> {
     const cleanNumber = number.replace(/\D/g, "");

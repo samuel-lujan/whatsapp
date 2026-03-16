@@ -1,7 +1,7 @@
 import { execSync } from "child_process";
 import type { WAState } from "whatsapp-web.js";
 import { Client, LocalAuth } from "whatsapp-web.js";
-import type { ConnectionStatus, StatusResult } from "../interfaces";
+import type { ConnectionStatus, StatusResult } from "../wppwebjs/types";
 import {
     onQr,
     onAuthenticated,
@@ -16,7 +16,7 @@ import {
     safeDestroyClient,
 } from "./handlers";
 import { sessions } from ".";
-import { raceWithTimeout } from "../../utils";
+import { raceWithTimeout } from "../utils";
 
 export async function createSession(companySlug: string): Promise<void> {
     try {

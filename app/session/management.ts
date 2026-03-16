@@ -1,11 +1,11 @@
 import fs from "fs";
 import path from "path";
 import type { Client } from "whatsapp-web.js";
-import type { ChatIdResult, ClearAllResult, ClearResult, DeleteAllResult } from "../interfaces";
+import type { ChatIdResult, ClearAllResult, ClearResult, DeleteAllResult } from "../wppwebjs/types";
 import { safeDestroyClient } from "./handlers";
-import { findCorrectChatId } from "../number-utils";
+import { findCorrectChatId } from "../wppwebjs/number-utils";
 import { sessions } from ".";
-import { raceWithTimeout } from "../../utils";
+import { raceWithTimeout } from "../utils";
 
 export async function clearSession(companySlug: string): Promise<ClearResult> {
     if (!sessions[companySlug]) {

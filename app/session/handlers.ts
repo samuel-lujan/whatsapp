@@ -1,9 +1,9 @@
 import { execSync } from "child_process";
 import type { Client, Message } from "whatsapp-web.js";
-import { getAiResponse } from "../../langchain";
+import { getAiResponse } from "../langchain";
 import { PERMANENT_FAILURE_REASONS, RECONNECT_CONFIG } from ".";
 import { sessions } from ".";
-import { raceWithTimeout } from "../../utils";
+import { raceWithTimeout } from "../utils";
 
 export async function safeDestroyClient(companySlug: string): Promise<void> {
     const session = sessions[companySlug];

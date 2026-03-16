@@ -1,9 +1,9 @@
 import type { WAState } from "whatsapp-web.js";
 import { HEALTH_CHECK_INTERVAL_MS } from ".";
-import type { HealthResult } from "../interfaces";
+import type { HealthResult } from "../wppwebjs/types";
 import { safeDestroyClient, scheduleReconnect } from "./handlers";
 import { sessions } from ".";
-import { raceWithTimeout } from "../../utils";
+import { raceWithTimeout } from "../utils";
 
 export async function verifyClientHealth(companySlug: string): Promise<HealthResult> {
     if (!sessions[companySlug] || !sessions[companySlug].client) {

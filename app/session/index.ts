@@ -1,4 +1,4 @@
-import type { SessionState } from "../interfaces";
+import type { SessionState } from "../wppwebjs/types";
 
 // === Configuracao de reconnect ===
 export const HEALTH_CHECK_INTERVAL_MS = 60000; // 1 minuto

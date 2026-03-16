@@ -1,10 +1,10 @@
 import fs from "fs";
 import path from "path";
-import type { AppError, SendResult } from "./interfaces";
-import { verifyClientHealth } from "./session/health";
-import { safeDestroyClient } from "./session/handlers";
+import type { AppError, SendResult } from "./types";
+import { verifyClientHealth } from "../session/health";
+import { safeDestroyClient } from "../session/handlers";
 import { validateWhatsAppNumber } from "./number-utils";
-import { sessions } from "./session";
+import { sessions } from "../session";
 
 export async function sendMessage(
     companySlug: string,
