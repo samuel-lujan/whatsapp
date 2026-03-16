@@ -1,139 +1,15 @@
-import { execSync } from "child_process";
 import type { Client, Message } from "whatsapp-web.js";
 import { getAiResponse } from "../langchain";
-import { createSession, PERMANENT_FAILURE_REASONS, RECONNECT_CONFIG } from ".";
+import { safeDestroyClient, scheduleReconnect } from ".";
+import { PERMANENT_FAILURE_REASONS } from ".";
 import { sessions } from ".";
 import { raceWithTimeout } from "../utils";
+import type { SessionState } from "../types";
 
-export async function safeDestroyClient(companySlug: string): Promise<void> {
-    const session = sessions[companySlug];
-    if (!session || !session.client) {
-        delete sessions[companySlug];
-        return;
-    }
-
-    if (session.destroying) {
-        console.log(`[DESTROY] ${companySlug}: ja esta sendo destruido, ignorando`);
-        return;
-    }
-    session.destroying = true;
-
-    if (session.reconnectTimer) {
-        clearTimeout(session.reconnectTimer);
-        session.reconnectTimer = null;
-    }
-
-    const client = session.client;
-
-    try {
-        await raceWithTimeout(client.destroy(), 10000, "destroy timeout");
-        console.log(`[DESTROY] ${companySlug}: client.destroy() ok`);
-    } catch (e) {
-        console.log(`[DESTROY] ${companySlug}: client.destroy() falhou: ${(e as Error).message}`);
-
-        try {
-            if (client.pupBrowser) {
-                const browserProcess = client.pupBrowser.process();
-                if (browserProcess) {
-                    console.log(
-                        `[DESTROY] ${companySlug}: forçando kill no Chrome PID ${browserProcess.pid}`,
-                    );
-                    browserProcess.kill("SIGKILL");
-                }
-            } else {
-                console.log(
-                    `[DESTROY] ${companySlug}: pupBrowser null, buscando processos Chrome órfãos...`,
-                );
-                try {
-                    const sessionDir = `session-${companySlug}`;
-                    const result = execSync(`pgrep -f "${sessionDir}" || true`, {
-                        timeout: 5000,
-                    })
-                        .toString()
-                        .trim();
-                    if (result) {
-                        const pids = result.split("\n").filter(Boolean);
-                        console.log(
-                            `[DESTROY] ${companySlug}: encontrados ${pids.length} processos órfãos: ${pids.join(", ")}`,
-                        );
-                        execSync(`kill -9 ${pids.join(" ")} || true`, { timeout: 5000 });
-                        console.log(`[DESTROY] ${companySlug}: processos órfãos eliminados`);
-                    } else {
-                        console.log(
-                            `[DESTROY] ${companySlug}: nenhum processo Chrome órfão encontrado`,
-                        );
-                    }
-                } catch (pgrepErr) {
-                    console.log(
-                        `[DESTROY] ${companySlug}: busca de processos órfãos falhou: ${(pgrepErr as Error).message}`,
-                    );
-                }
-            }
-        } catch (killErr) {
-            console.log(
-                `[DESTROY] ${companySlug}: force-kill falhou: ${(killErr as Error).message}`,
-            );
-        }
-    }
-
-    delete sessions[companySlug];
-    console.log(`[DESTROY] ${companySlug}: sessao removida da memoria`);
-}
-
-export async function scheduleReconnect(companySlug: string, reason: string): Promise<void> {
-    if (!sessions[companySlug]) {
-        console.log(`[RECONNECT] ${companySlug}: sessao removida, cancelando reconnect`);
-        return;
-    }
-
-    const session = sessions[companySlug];
-    const attempt = session.reconnectAttempts || 0;
-
-    if (attempt >= RECONNECT_CONFIG.maxAttempts) {
-        console.log(
-            `[RECONNECT] ${companySlug}: max tentativas (${RECONNECT_CONFIG.maxAttempts}) atingido, desistindo`,
-        );
-        await safeDestroyClient(companySlug);
-        return;
-    }
-
-    const attempt_delay =
-        RECONNECT_CONFIG.initialDelayMs * Math.pow(RECONNECT_CONFIG.backoffMultiplier, attempt);
-    const delay = Math.min(attempt_delay, RECONNECT_CONFIG.maxDelayMs);
-    console.log(
-        `[RECONNECT] ${companySlug}: tentativa ${attempt + 1}/${RECONNECT_CONFIG.maxAttempts} em ${delay / 1000}s (motivo: ${reason})`,
-    );
-
-    session.reconnectTimer = setTimeout(async () => {
-        try {
-            await safeDestroyClient(companySlug);
-
-            console.log(`[RECONNECT] ${companySlug}: criando sessao nova...`);
-            await createSession(companySlug);
-
-            await new Promise<void>((resolve) => setTimeout(resolve, 15000));
-
-            if (sessions[companySlug] && sessions[companySlug].ready) {
-                console.log(`[RECONNECT] ${companySlug}: reconectou com sucesso!`);
-                sessions[companySlug].reconnectAttempts = 0;
-            } else if (sessions[companySlug]) {
-                sessions[companySlug].reconnectAttempts = attempt + 1;
-                await scheduleReconnect(companySlug, reason);
-            }
-        } catch (err) {
-            console.log(`[RECONNECT] ${companySlug}: tentativa falhou: ${(err as Error).message}`);
-            if (sessions[companySlug]) {
-                sessions[companySlug].reconnectAttempts = attempt + 1;
-                await scheduleReconnect(companySlug, reason);
-            }
-        }
-    }, delay);
-}
-
-export function onQr(companySlug: string) {
+export function onQr(session: SessionState) {
     return (qr: string) => {
-        console.log(`QR Code gerado para empresa: ${companySlug}`);
-        sessions[companySlug].qrCode = qr;
+        console.log(`QR Code gerado para empresa: ${session.companySlug}`);
+        session.qrCode = qr;
     };
 }
 
@@ -143,33 +19,33 @@ export function onAuthenticated(companySlug: string) {
     };
 }
 
-export function onReady(companySlug: string, client: Client) {
+export function onReady(session: SessionState) {
     return async () => {
-        console.log(`✅ WhatsApp conectado para empresa: ${companySlug}`);
-        if (sessions[companySlug]) {
-            sessions[companySlug].ready = true;
-            sessions[companySlug].connecting = false;
-            sessions[companySlug].qrCode = null;
+        console.log(`✅ WhatsApp conectado para empresa: ${session.companySlug}`);
+        if (session) {
+            session.ready = true;
+            session.connecting = false;
+            session.qrCode = null;
 
             try {
-                const info = client.info;
-                console.log(`📱 Cliente ${companySlug} conectado como: ${info.wid._serialized}`);
+                const info = session.client.info;
+                console.log(`📱 Cliente ${session.companySlug} conectado como: ${info.wid._serialized}`);
             } catch (e) {
-                console.log(`⚠️ Cliente ${companySlug} conectado mas sem info detalhada`);
+                console.log(`⚠️ Cliente ${session.companySlug} conectado mas sem info detalhada`);
             }
         }
     };
 }
 
-export function onDisconnected(companySlug: string) {
+export function onDisconnected(session: SessionState) {
     return async (reason: string) => {
-        console.log(`[EVENT] ${companySlug} disconnected: ${reason}`);
-        if (!sessions[companySlug]) return;
+        console.log(`[EVENT] ${session.companySlug} disconnected: ${reason}`);
+        if (!session) return;
 
-        sessions[companySlug].ready = false;
-        sessions[companySlug].qrCode = null;
-        sessions[companySlug].lastDisconnectTime = Date.now();
-        sessions[companySlug].lastDisconnectReason = reason;
+        session.ready = false;
+        session.qrCode = null;
+        session.lastDisconnectTime = Date.now();
+        session.lastDisconnectReason = reason;
 
         const shouldReconect = (reason) => {
             if (typeof reason === "string") {
@@ -179,12 +55,12 @@ export function onDisconnected(companySlug: string) {
         };
 
         if (shouldReconect(reason)) {
-            await scheduleReconnect(companySlug, reason);
+            await scheduleReconnect(session.companySlug, reason);
         } else {
             console.log(
-                `[EVENT] ${companySlug}: falha permanente (${reason}), destruindo sem reconnect`,
+                `[EVENT] ${session.companySlug}: falha permanente (${reason}), destruindo sem reconnect`,
             );
-            await safeDestroyClient(companySlug);
+            await safeDestroyClient(session.companySlug);
         }
     };
 }
@@ -196,30 +72,30 @@ export function onAuthFailure(companySlug: string) {
     };
 }
 
-export function onChangeState(companySlug: string) {
+export function onChangeState(session: SessionState) {
     return (state: string) => {
-        console.log(`[EVENT] ${companySlug} state changed: ${state}`);
-        if (!sessions[companySlug]) return;
+        console.log(`[EVENT] ${session.companySlug} state changed: ${state}`);
+        if (!session) return;
 
         if (state === "CONNECTED") {
-            sessions[companySlug].ready = true;
-            sessions[companySlug].reconnectAttempts = 0;
+            session.ready = true;
+            session.reconnectAttempts = 0;
         }
         const badStates = ["UNPAIRED", "UNLAUNCHED", "UNPAIRED_IDLE"];
         if (badStates.includes(state)) {
-            sessions[companySlug].ready = false;
-            sessions[companySlug].connecting = false;
+            session.ready = false;
+            session.connecting = false;
         }
     };
 }
 
-export function onError(companySlug: string) {
+export function onError(session: SessionState) {
     return async (error: Error) => {
-        console.log(`[EVENT] ${companySlug} error: ${error.message}`);
-        if (!sessions[companySlug]) return;
+        console.log(`[EVENT] ${session.companySlug} error: ${error.message}`);
+        if (!session) return;
 
-        sessions[companySlug].ready = false;
-        sessions[companySlug].connecting = false;
+        session.ready = false;
+        session.connecting = false;
 
         const isBrowserError =
             error.message.includes("Protocol error") ||
@@ -228,18 +104,16 @@ export function onError(companySlug: string) {
             error.message.includes("Navigation failed");
 
         if (isBrowserError) {
-            sessions[companySlug].lastDisconnectTime = Date.now();
-            sessions[companySlug].lastDisconnectReason = `error:${error.message.substring(0, 50)}`;
-            await scheduleReconnect(companySlug, `error:${error.message.substring(0, 50)}`);
+            session.lastDisconnectTime = Date.now();
+            session.lastDisconnectReason = `error:${error.message.substring(0, 50)}`;
+            await scheduleReconnect(session.companySlug, `error:${error.message.substring(0, 50)}`);
         }
     };
 }
 
-export function onChangeBattery(companySlug: string) {
+export function onChangeBattery(session: SessionState) {
     return (_batteryInfo: unknown) => {
-        if (sessions[companySlug]) {
-            sessions[companySlug].lastBatteryUpdate = Date.now();
-        }
+        session.lastBatteryUpdate = Date.now();
     };
 }
 

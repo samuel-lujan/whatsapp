@@ -4,6 +4,7 @@ import { Client } from "whatsapp-web.js";
 
 export interface SessionState {
     client: Client;
+    companySlug: string;
     qrCode: string | null;
     ready: boolean;
     connecting: boolean;
