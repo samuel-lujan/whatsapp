@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import Rollbar from "rollbar";
 import * as whatsapp from "./wppwebjs";
+import * as sessionManagement from "./session";
 import qrcodeTerminal from "qrcode-terminal";
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "sua-chave-secreta-aqui";
@@ -39,8 +40,8 @@ export function createRouter(rollbar: Rollbar): Router {
             console.log(`📊 Verificando status da empresa: ${companySlug}`);
 
             // Primeiro verifica se já existe uma sessão ativa (rápido)
-            if (whatsapp.hasActiveSession(companySlug)) {
-                const quickStatus = whatsapp.checkConnectionStatus(companySlug);
+            if (sessionManagement.hasActiveSession(companySlug)) {
+                const quickStatus = sessionManagement.checkConnectionStatus(companySlug);
                 if (quickStatus.connected) {
                     console.log(`⚡ Empresa ${companySlug} já conectada (verificação rápida)`);
                     return res.json({
@@ -53,7 +54,7 @@ export function createRouter(rollbar: Rollbar): Router {
             }
 
             // Se não tem sessão ativa, faz verificação completa
-            const status = await whatsapp.getStatus(companySlug);
+            const status = await sessionManagement.getStatus(companySlug);
 
             if (status.connected) {
                 console.log(`✅ Empresa ${companySlug} está conectada`);
@@ -127,7 +128,7 @@ export function createRouter(rollbar: Rollbar): Router {
             console.log(`🔍 Verificando conexão da empresa ${companySlug} antes de enviar...`);
 
             // Primeiro tenta quick check
-            let quickStatus = whatsapp.checkConnectionStatus(companySlug);
+            let quickStatus = sessionManagement.checkConnectionStatus(companySlug);
 
             // Se retornou needs_verification ou não conectado, faz verificação completa
             if (!quickStatus.connected) {
@@ -135,7 +136,7 @@ export function createRouter(rollbar: Rollbar): Router {
                     `⚠️ Quick check retornou não conectado para ${companySlug}, fazendo verificação completa...`,
                 );
 
-                const healthCheck = await whatsapp.verifyClientHealth(companySlug);
+                const healthCheck = await sessionManagement.verifyClientHealth(companySlug);
 
                 if (healthCheck.healthy) {
                     console.log(
@@ -165,9 +166,10 @@ export function createRouter(rollbar: Rollbar): Router {
                 });
             }
 
-            console.log(`Número recebido: ${number}`);
+            const session = sessionManagement.getSession(companySlug);
+            console.log(`Número recebido: ${number}, sessão: ${session?.ready ? "pronta" : "não pronta"}`);
 
-            const result = await whatsapp.sendMessage(companySlug, number, message);
+            const result = await whatsapp.sendMessage(companySlug, number, message, session);
             console.log(`✅ Mensagem enviada pela empresa ${companySlug}`);
             res.status(200).json({
                 ...result,
@@ -211,7 +213,7 @@ export function createRouter(rollbar: Rollbar): Router {
     // Rota para listar empresas conectadas
     router.get("/companies", authenticateToken, (req, res) => {
         try {
-            const sessions = whatsapp.listSessions();
+            const sessions = sessionManagement.listSessions();
             res.json({
                 sessions,
                 total: Object.keys(sessions).length,
@@ -228,7 +230,7 @@ export function createRouter(rollbar: Rollbar): Router {
         const { companySlug } = req.params as { companySlug: string };
         try {
             console.log(`🔍 Debug da sessão: ${companySlug}`);
-            const debugInfo = await whatsapp.debugSessionState(companySlug);
+            const debugInfo = await sessionManagement.debugSessionState(companySlug);
             res.json({
                 companySlug,
                 debug: debugInfo,
@@ -248,7 +250,7 @@ export function createRouter(rollbar: Rollbar): Router {
         const { companySlug } = req.params as { companySlug: string };
         try {
             console.log(`🩺 Verificando saúde do cliente: ${companySlug}`);
-            const healthCheck = await whatsapp.verifyClientHealth(companySlug);
+            const healthCheck = await sessionManagement.verifyClientHealth(companySlug);
             res.json({
                 companySlug,
                 health: healthCheck,
@@ -276,7 +278,7 @@ export function createRouter(rollbar: Rollbar): Router {
         };
         try {
             console.log(`🔍 Buscando informações do número ${number} para empresa ${companySlug}`);
-            const numberInfo = await whatsapp.searchNumberInfo(companySlug, number);
+            const numberInfo = await sessionManagement.searchNumberInfo(companySlug, number);
             res.json({
                 companySlug,
                 number,
@@ -300,7 +302,7 @@ export function createRouter(rollbar: Rollbar): Router {
         try {
             console.log(`🧹 Solicitação de limpeza da sessão: ${companySlug}`);
 
-            const result = await whatsapp.clearSession(companySlug);
+            const result = await sessionManagement.clearSession(companySlug);
 
             if (result.success) {
                 console.log(`✅ Sessão ${companySlug} limpa:`, result.message);
@@ -341,7 +343,7 @@ export function createRouter(rollbar: Rollbar): Router {
         try {
             console.log(`🧹 Solicitação de limpeza de TODAS as sessões`);
 
-            const result = await whatsapp.clearAllSessions();
+            const result = await sessionManagement.clearAllSessions();
 
             console.log(`✅ Limpeza em massa concluída:`, result.summary);
             res.json({
@@ -371,7 +373,7 @@ export function createRouter(rollbar: Rollbar): Router {
         try {
             console.log(`🗑️ Solicitação de EXCLUSÃO de todas as empresas e sessões`);
 
-            const result = await whatsapp.deleteAllCompaniesAndSessions();
+            const result = await sessionManagement.deleteAllCompaniesAndSessions();
 
             console.log(`✅ Exclusão completa concluída:`, result.summary);
             res.json({

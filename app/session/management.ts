@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import type { Client } from "whatsapp-web.js";
-import type { ChatIdResult, ClearAllResult, ClearResult, DeleteAllResult } from "../types";
+import type { ChatIdResult, ClearAllResult, ClearResult, DeleteAllResult, SessionState } from "../types";
 import { safeDestroyClient } from "./handlers";
 import { findCorrectChatId } from "../wppwebjs/number-utils";
 import { sessions } from ".";
@@ -282,6 +282,10 @@ export async function searchNumberInfo(
     } catch (error) {
         throw new Error(`Erro ao buscar informações: ${(error as Error).message}`);
     }
+}
+
+export function getSession(companySlug: string): SessionState | null {
+    return sessions[companySlug] ?? null;
 }
 
 export function listSessions(): Record<string, Record<string, unknown>> {

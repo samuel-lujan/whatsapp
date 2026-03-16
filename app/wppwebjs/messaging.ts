@@ -1,16 +1,16 @@
 import fs from "fs";
 import path from "path";
-import type { AppError, SendResult } from "../types";
+import type { AppError, SendResult, SessionState } from "../types";
 import { verifyClientHealth, safeDestroyClient } from "../session";
 import { validateWhatsAppNumber } from "./number-utils";
-import { sessions } from "../session";
 
 export async function sendMessage(
     companySlug: string,
     number: string,
     message: string,
+    session: SessionState
 ): Promise<SendResult> {
-    if (!sessions[companySlug]) {
+    if (!session) {
         const err = new Error(
             `Empresa ${companySlug} não existe. Acesse /status/${companySlug} para criar sessão.`,
         ) as AppError;
@@ -19,7 +19,7 @@ export async function sendMessage(
         throw err;
     }
 
-    if (!sessions[companySlug].ready) {
+    if (!session.ready) {
         const err = new Error(
             `Empresa ${companySlug} não está conectada ao WhatsApp. Acesse /status/${companySlug} para reconectar.`,
         ) as AppError;
@@ -28,10 +28,10 @@ export async function sendMessage(
         throw err;
     }
 
-    console.log(`📤 Iniciando envio para ${companySlug} (ready=${sessions[companySlug].ready})`);
+    console.log(`📤 Iniciando envio para ${companySlug} (ready=${session.ready})`);
 
     try {
-        const client = sessions[companySlug].client;
+        const client = session.client;
 
         console.log(`🔍 Validando número ${number}...`);
         const validation = await validateWhatsAppNumber(client, number);
@@ -118,7 +118,7 @@ export async function sendMessage(
             await new Promise<void>((resolve) => setTimeout(resolve, 1000));
 
             try {
-                const client = sessions[companySlug].client;
+                const client = session.client;
                 const validation = await validateWhatsAppNumber(client, number);
 
                 if (validation.isValid) {
@@ -194,8 +194,8 @@ export async function sendMessage(
                 console.log(
                     `❌ Cliente ${companySlug} confirmado como não saudável: ${healthCheck.reason}`,
                 );
-                if (sessions[companySlug]) {
-                    sessions[companySlug].ready = false;
+                if (session) {
+                    session.ready = false;
                 }
 
                 const connErr = new Error(
@@ -229,8 +229,8 @@ export async function sendMessage(
 
         if (isConnectionError) {
             console.log(`🔌 Erro de conexão definitivo para ${companySlug}`);
-            if (sessions[companySlug]) {
-                sessions[companySlug].ready = false;
+            if (session) {
+                session.ready = false;
             }
 
             const connErr = new Error(
