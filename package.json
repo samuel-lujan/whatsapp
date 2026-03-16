@@ -7,7 +7,9 @@
     "dev": "nodemon --exec tsx --trace-warnings ./app/index.ts",
     "start": "tsx ./app/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"app/**/*.ts\"",
+    "format:check": "prettier --check \"app/**/*.ts\""
   },
   "keywords": [],
   "author": "",
@@ -28,6 +30,7 @@
     "@types/node": "^25.5.0",
     "@types/qrcode": "^1.5.6",
     "nodemon": "^3.1.10",
+    "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
