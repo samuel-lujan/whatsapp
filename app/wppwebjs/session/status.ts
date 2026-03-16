@@ -1,22 +1,23 @@
 import type { WAState } from "whatsapp-web.js";
 import type { ConnectionStatus, StatusResult } from "../interfaces";
 import { createSession } from "./client";
-import { waitForQrCode } from "./handlers";
-import { safeDestroyClient } from "./handlers";
+import { waitForQrCode, safeDestroyClient } from "./handlers";
 import { sessions } from "./sessions";
+import { markSessionAsReady } from "./utils";
 import { raceWithTimeout } from "../../utils";
 
 export async function getStatus(companySlug: string): Promise<StatusResult> {
-  if (sessions[companySlug] && sessions[companySlug].ready) {
+  const isConnected = sessions[companySlug]?.ready;
+  if (isConnected) {
     console.log(`✅ Cliente ${companySlug} já está conectado - não precisa de QR Code`);
-    return { connected: true };
+    return { connected: isConnected };
   }
 
-  if (sessions[companySlug] && sessions[companySlug].client) {
+  const client = sessions[companySlug]?.client;
+  if (client) {
     console.log(`🔍 Verificando estado real do cliente ${companySlug}...`);
 
     try {
-      const client = sessions[companySlug].client;
       const state = (await raceWithTimeout(client.getState(), 5000)) as WAState | null;
 
       console.log(`📱 Estado atual do cliente ${companySlug}:`, state);
@@ -25,13 +26,11 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
         console.log(
           `🔧 Cliente ${companySlug} estava conectado mas não marcado como ready - corrigindo...`,
         );
-        sessions[companySlug].ready = true;
-        sessions[companySlug].connecting = false;
-        sessions[companySlug].qrCode = null;
+        markSessionAsReady(companySlug);
         return { connected: true };
       }
 
-      if (state === null || state === undefined) {
+      if (state == null) {
         console.log(
           `🔍 Estado ambíguo para ${companySlug}, tentando verificação prática...`,
         );
@@ -39,9 +38,7 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
           const info = client.info;
           if (info && info.wid) {
             console.log(`🔧 Cliente ${companySlug} tem info válida - marcando como ready`);
-            sessions[companySlug].ready = true;
-            sessions[companySlug].connecting = false;
-            sessions[companySlug].qrCode = null;
+            markSessionAsReady(companySlug);
             return { connected: true };
           }
         } catch (e) {
@@ -51,16 +48,16 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
           );
         }
       }
+      return { connected: false };
     } catch (error) {
+      const msg = (error as Error).message;
       console.log(
         `⚠️ Cliente ${companySlug} não está realmente conectado:`,
-        (error as Error).message,
+        msg,
       );
 
       if (
-        (error as Error).message.includes("null") ||
-        (error as Error).message.includes("destroyed") ||
-        (error as Error).message === "timeout"
+        msg.includes("null") || msg.includes("destroyed") || msg === "timeout"
       ) {
         console.log(
           `[ZOMBIE] ${companySlug}: sessão zumbi detectada (connecting=${sessions[companySlug]?.connecting}, ready=${sessions[companySlug]?.ready}) - destruindo...`,
@@ -71,23 +68,23 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
   }
 
   if (
-    sessions[companySlug] &&
-    sessions[companySlug].connecting &&
-    !sessions[companySlug].ready
+    sessions[companySlug]?.connecting &&
+    !sessions[companySlug]?.ready
   ) {
     console.log(`⏳ Cliente ${companySlug} ainda está conectando...`);
     await new Promise<void>((resolve) => setTimeout(resolve, 3000));
 
-    if (sessions[companySlug] && sessions[companySlug].ready) {
+    if (sessions[companySlug]?.ready) {
       console.log(`✅ Cliente ${companySlug} finalizou conexão durante a espera`);
       return { connected: true };
     }
 
-    if (sessions[companySlug] && sessions[companySlug].qrCode) {
+    const qrCode = sessions[companySlug]?.qrCode;
+    if (qrCode) {
       console.log(`📱 Cliente ${companySlug} ainda conectando - QR Code disponível`);
       return {
         connected: false,
-        qrCode: sessions[companySlug].qrCode,
+        qrCode: qrCode,
         status: "connecting",
       };
     }
@@ -113,12 +110,12 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
     }
   }
 
-  if (sessions[companySlug] && sessions[companySlug].ready) {
+  if (sessions[companySlug]?.ready) {
     console.log(`✅ Cliente ${companySlug} conectou durante o processo`);
     return { connected: true };
   }
 
-  const qrCode = sessions[companySlug] ? sessions[companySlug].qrCode : null;
+  const qrCode = sessions[companySlug]?.qrCode ?? null;
   console.log(
     `📱 Retornando status para ${companySlug} - QR Code: ${
       qrCode ? "Disponível" : "Não disponível"
@@ -126,8 +123,8 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
   );
   console.log(`🔍 Estado da sessão ${companySlug}:`, {
     exists: !!sessions[companySlug],
-    ready: sessions[companySlug] ? sessions[companySlug].ready : false,
-    connecting: sessions[companySlug] ? sessions[companySlug].connecting : false,
+    ready: sessions[companySlug]?.ready ?? false,
+    connecting: sessions[companySlug]?.connecting ?? false,
     hasQrCode: !!qrCode,
   });
 
@@ -140,33 +137,30 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
 
 export function hasActiveSession(companySlug: string): boolean {
   return !!(
-    sessions[companySlug] &&
-    (sessions[companySlug].ready || sessions[companySlug].connecting)
+    (sessions[companySlug]?.ready || sessions[companySlug]?.connecting)
   );
 }
-
+ 
 export function checkConnectionStatus(companySlug: string): ConnectionStatus {
-  if (sessions[companySlug] && sessions[companySlug].ready) {
-    console.log(`✅ Verificação rápida: Cliente ${companySlug} está pronto`);
-    return { connected: true };
-  }
+  
+  const response: ConnectionStatus = { connected: false };
 
-  if (sessions[companySlug] && sessions[companySlug].client) {
+  if (sessions[companySlug]?.ready) {
+    console.log(`✅ Verificação rápida: Cliente ${companySlug} está pronto`);
+    response.connected = true;
+  } else if (sessions[companySlug]?.client) {
     console.log(
       `🔍 Verificação rápida: Cliente ${companySlug} existe mas não está marcado como ready`,
     );
 
     try {
-      const client = sessions[companySlug].client;
+      const client = sessions[companySlug]?.client;
       if (client.pupPage && !client.pupPage.isClosed()) {
         console.log(
           `🤔 Cliente ${companySlug} pode estar conectado - recomendado verificação completa`,
         );
-        return {
-          connected: false,
-          status: "needs_verification",
-          suggestion: "Use /status para verificação completa",
-        };
+        response.status = "needs_verification";
+        response.suggestion = "Use /status para verificação completa";
       }
     } catch (e) {
       console.log(
@@ -174,13 +168,11 @@ export function checkConnectionStatus(companySlug: string): ConnectionStatus {
         (e as Error).message,
       );
     }
-  }
-
-  if (sessions[companySlug] && sessions[companySlug].connecting) {
+  } else if (sessions[companySlug]?.connecting) {
     console.log(`⏳ Verificação rápida: Cliente ${companySlug} ainda conectando`);
-    return { connected: false, status: "connecting" };
+    response.status = "connecting";
+  } else {
+    console.log(`❌ Verificação rápida: Cliente ${companySlug} não conectado`);
   }
-
-  console.log(`❌ Verificação rápida: Cliente ${companySlug} não conectado`);
-  return { connected: false };
+  return response;
 }
