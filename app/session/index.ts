@@ -1,5 +1,5 @@
-import type { SessionState } from "../types";
-import { zombieSessionMonitor } from "./service";
+import { Session } from "./session";
+import { zombieSessionMonitor } from "./sessionManagement";
 
 // === Configuracao de reconnect ===
 export const HEALTH_CHECK_INTERVAL_MS = 60000; // 1 minuto
@@ -20,8 +20,9 @@ export const PERMANENT_FAILURE_REASONS = [
 ];
 
 
-export const sessions: Record<string, SessionState> = {};
+export const sessions: Record<string, Session> = {};
 
 setInterval(zombieSessionMonitor, HEALTH_CHECK_INTERVAL_MS);
 
-export * from "./service";
+export * from "./session";
+export * from "./sessionManagement";

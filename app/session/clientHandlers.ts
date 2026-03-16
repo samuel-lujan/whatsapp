@@ -2,7 +2,6 @@ import type { Client, Message } from "whatsapp-web.js";
 import { getAiResponse } from "../langchain";
 import { safeDestroyClient, scheduleReconnect } from ".";
 import { PERMANENT_FAILURE_REASONS } from ".";
-import { sessions } from ".";
 import { raceWithTimeout } from "../utils";
 import type { SessionState } from "../types";
 
@@ -115,35 +114,6 @@ export function onChangeBattery(session: SessionState) {
     return (_batteryInfo: unknown) => {
         session.lastBatteryUpdate = Date.now();
     };
-}
-
-export async function waitForQrCode(companySlug: string, timeout = 30000): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-            console.log(
-                `⏰ Timeout ao aguardar QR Code para ${companySlug} após ${timeout / 1000}s`,
-            );
-            reject(new Error(`Timeout ao gerar QR Code para ${companySlug}. Tente novamente.`));
-        }, timeout);
-
-        const interval = setInterval(() => {
-            if (
-                sessions[companySlug] &&
-                (sessions[companySlug].qrCode || sessions[companySlug].ready)
-            ) {
-                clearTimeout(timeoutId);
-                clearInterval(interval);
-                console.log(`✅ QR Code gerado ou cliente conectado para ${companySlug}`);
-                resolve();
-            }
-
-            if (!sessions[companySlug]) {
-                clearTimeout(timeoutId);
-                clearInterval(interval);
-                reject(new Error(`Sessão ${companySlug} foi removida durante a espera`));
-            }
-        }, 1000);
-    });
 }
 
 export function onMessage(companySlug: string, client: Client) {

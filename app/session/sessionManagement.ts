@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { Client, LocalAuth } from "whatsapp-web.js";
 import type { WAState } from "whatsapp-web.js";
 import type {
     ChatIdResult,
@@ -9,21 +8,9 @@ import type {
     ConnectionStatus,
     DeleteAllResult,
     HealthResult,
-    SessionState,
     StatusResult,
 } from "../types";
-import {
-    onAuthenticated,
-    onAuthFailure,
-    onChangeBattery,
-    onChangeState,
-    onDisconnected,
-    onError,
-    onMessage,
-    onQr,
-    onReady,
-    waitForQrCode,
-} from "./handlers";
+import { Session } from "./session";
 import { findCorrectChatId } from "../wppwebjs/number-utils";
 import { sessions } from ".";
 import { RECONNECT_CONFIG } from ".";
@@ -138,18 +125,18 @@ export async function scheduleReconnect(companySlug: string, reason: string): Pr
 
             await new Promise<void>((resolve) => setTimeout(resolve, 15000));
 
-            if (sessions[companySlug] && sessions[companySlug].ready) {
+            if (session?.ready) {
                 console.log(`[RECONNECT] ${companySlug}: reconectou com sucesso!`);
-                sessions[companySlug].reconnectAttempts = 0;
-            } else if (sessions[companySlug]) {
-                sessions[companySlug].reconnectAttempts = attempt + 1;
-                await scheduleReconnect(companySlug, reason);
+                session.reconnectAttempts = 0;
+            } else if (session) {
+                session.reconnectAttempts = attempt + 1;
+                await scheduleReconnect(session.companySlug, reason);
             }
         } catch (err) {
-            console.log(`[RECONNECT] ${companySlug}: tentativa falhou: ${(err as Error).message}`);
-            if (sessions[companySlug]) {
-                sessions[companySlug].reconnectAttempts = attempt + 1;
-                await scheduleReconnect(companySlug, reason);
+            console.log(`[RECONNECT] ${session.companySlug}: tentativa falhou: ${(err as Error).message}`);
+            if (session) {
+                session.reconnectAttempts = attempt + 1;
+                await scheduleReconnect(session.companySlug, reason);
             }
         }
     }, delay);
@@ -183,64 +170,16 @@ export async function createSession(companySlug: string): Promise<void> {
     console.log(`🖥️ Ambiente: ${isProduction ? "PRODUÇÃO" : "DESENVOLVIMENTO"}`);
     console.log(`🌐 Browser: ${isHeadless ? "HEADLESS (sem interface)" : "COM INTERFACE"}`);
 
-    const client = new Client({
-        authStrategy: new LocalAuth({ clientId: companySlug }),
-        puppeteer: {
-            headless: isHeadless,
-            protocolTimeout: 120000,
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-accelerated-2d-canvas",
-                "--no-first-run",
-                "--no-zygote",
-                "--disable-gpu",
-                "--disable-extensions",
-                "--disable-background-networking",
-                "--disable-default-apps",
-                "--disable-sync",
-                "--disable-translate",
-                "--metrics-recording-only",
-                "--mute-audio",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-component-update",
-            ],
-        },
-    });
+    const session = new Session(companySlug, isHeadless);
+    sessions[companySlug] = session;
+    await session.initialize();
 
-    sessions[companySlug] = {
-        client,
-        companySlug,
-        qrCode: null,
-        ready: false,
-        connecting: false,
-        reconnectAttempts: 0,
-        reconnectTimer: null,
-        lastDisconnectTime: null,
-        lastDisconnectReason: null,
-        destroying: false,
-    };
-
-    const session = sessions[companySlug];
-    client.on("qr", onQr(session));
-    client.on("authenticated", onAuthenticated(companySlug));
-    client.on("ready", onReady(session));
-    client.on("disconnected", onDisconnected(session));
-    client.on("auth_failure", onAuthFailure(companySlug));
-    client.on("change_state", onChangeState(session));
-    client.on("error", onError(session));
-    client.on("change_battery", onChangeBattery(session));
-    client.on("message", onMessage(session.companySlug, session.client));
-
-    sessions[companySlug].connecting = true;
-    await client.initialize();
 }
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
-export async function getStatus(companySlug: string, session: SessionState): Promise<StatusResult> {
+export async function getStatus(companySlug: string): Promise<StatusResult> {
+    const session = sessions[companySlug];
     if (session?.ready) {
         console.log(`✅ Cliente ${companySlug} já está conectado - não precisa de QR Code`);
         return { connected: true };
@@ -259,7 +198,7 @@ export async function getStatus(companySlug: string, session: SessionState): Pro
                 console.log(
                     `🔧 Cliente ${companySlug} estava conectado mas não marcado como ready - corrigindo...`,
                 );
-                markSessionAsReady(session);
+                session.markAsReady();
                 return { connected: true };
             }
 
@@ -273,7 +212,7 @@ export async function getStatus(companySlug: string, session: SessionState): Pro
                         console.log(
                             `🔧 Cliente ${companySlug} tem info válida - marcando como ready`,
                         );
-                        markSessionAsReady(session);
+                        session.markAsReady();
                         return { connected: true };
                     }
                 } catch (e) {
@@ -356,11 +295,13 @@ export async function getStatus(companySlug: string, session: SessionState): Pro
     };
 }
 
-export function hasActiveSession(session: SessionState): boolean {
+export function hasActiveSession(companySlug: string): boolean {
+    const session = sessions[companySlug];
     return !!(session?.ready || session?.connecting);
 }
 
-export function checkConnectionStatus(companySlug: string, session: SessionState): ConnectionStatus {
+export function checkConnectionStatus(companySlug: string): ConnectionStatus {
+    const session = sessions[companySlug];
     if (session?.ready) {
         console.log(`✅ Verificação rápida: Cliente ${companySlug} está pronto`);
         return { connected: true };
@@ -398,22 +339,15 @@ export function checkConnectionStatus(companySlug: string, session: SessionState
     return { connected: false };
 }
 
-function markSessionAsReady(session: SessionState): void {
-    if (session) {
-        session.ready = true;
-        session.connecting = false;
-        session.qrCode = null;
-    }
-}
-
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 export async function verifyClientHealth(companySlug: string): Promise<HealthResult> {
-    if (!sessions[companySlug] || !sessions[companySlug].client) {
+    const session = sessions[companySlug];
+    if (!session || !session.client) {
         return { healthy: false, reason: "Sessão não existe" };
     }
 
-    const client = sessions[companySlug].client;
+    const client = session.client;
 
     try {
         if (client.pupPage) {
@@ -833,7 +767,7 @@ export async function searchNumberInfo(
     }
 }
 
-export function getSession(companySlug: string): SessionState | null {
+export function getSession(companySlug: string): Session | null {
     return sessions[companySlug] ?? null;
 }
 
@@ -854,4 +788,35 @@ export function listSessions(): Record<string, Record<string, unknown>> {
         };
     }
     return sessionList;
+}
+
+async function waitForQrCode(companySlug: string, timeout = 30000): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            console.log(
+                `⏰ Timeout ao aguardar QR Code para ${companySlug} após ${timeout / 1000}s`,
+            );
+            reject(new Error(`Timeout ao gerar QR Code para ${companySlug}. Tente novamente.`));
+        }, timeout);
+
+        const session = sessions[companySlug];
+
+        const interval = setInterval(() => {
+            if (
+                session &&
+                (session.qrCode || session.ready)
+            ) {
+                clearTimeout(timeoutId);
+                clearInterval(interval);
+                console.log(`✅ QR Code gerado ou cliente conectado para ${companySlug}`);
+                resolve();
+            }
+
+            if (!sessions[companySlug]) {
+                clearTimeout(timeoutId);
+                clearInterval(interval);
+                reject(new Error(`Sessão ${companySlug} foi removida durante a espera`));
+            }
+        }, 1000);
+    });
 }

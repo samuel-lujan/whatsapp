@@ -1,14 +1,14 @@
 import fs from "fs";
 import path from "path";
-import type { AppError, SendResult, SessionState } from "../types";
-import { verifyClientHealth, safeDestroyClient } from "../session";
+import type { AppError, SendResult } from "../types";
+import { verifyClientHealth, safeDestroyClient, Session } from "../session";
 import { validateWhatsAppNumber } from "./number-utils";
 
 export async function sendMessage(
     companySlug: string,
     number: string,
     message: string,
-    session: SessionState
+    session: Session
 ): Promise<SendResult> {
     if (!session) {
         const err = new Error(

@@ -1,21 +1,5 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-import { Client } from "whatsapp-web.js";
-
-export interface SessionState {
-    client: Client;
-    companySlug: string;
-    qrCode: string | null;
-    ready: boolean;
-    connecting: boolean;
-    destroying: boolean;
-    reconnectAttempts: number;
-    reconnectTimer: ReturnType<typeof setTimeout> | null;
-    lastDisconnectTime: number | null;
-    lastDisconnectReason: string | null;
-    lastBatteryUpdate?: number;
-}
-
 export interface AppError extends Error {
     shouldRetry?: boolean;
     statusCode?: number;
