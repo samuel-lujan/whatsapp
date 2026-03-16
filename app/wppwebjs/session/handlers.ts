@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import type { Client, Message } from "whatsapp-web.js";
 import { getAiResponse } from "../../langchain";
 import { PERMANENT_FAILURE_REASONS, RECONNECT_CONFIG } from "./config";
-import { sessions } from "./sessions";
+import { createSession, sessions } from ".";
 import { raceWithTimeout } from "../../utils";
 
 export async function safeDestroyClient(companySlug: string): Promise<void> {
@@ -109,7 +109,6 @@ export async function scheduleReconnect(companySlug: string, reason: string): Pr
             await safeDestroyClient(companySlug);
 
             console.log(`[RECONNECT] ${companySlug}: criando sessao nova...`);
-            const { createSession } = await import("./client");
             await createSession(companySlug);
 
             await new Promise<void>((resolve) => setTimeout(resolve, 15000));

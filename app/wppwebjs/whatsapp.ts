@@ -1,4 +1,4 @@
-export * from "./session/sessions";
+export * from "./session";
 export * from "./session/client";
 export * from "./session/status";
 export * from "./session/health";

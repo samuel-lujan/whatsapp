@@ -1,8 +1,7 @@
 import type { WAState } from "whatsapp-web.js";
 import type { ConnectionStatus, StatusResult } from "../interfaces";
-import { createSession } from "./client";
+import { sessions, createSession } from ".";
 import { waitForQrCode, safeDestroyClient } from "./handlers";
-import { sessions } from "./sessions";
 import { raceWithTimeout } from "../../utils";
 
 export async function getStatus(companySlug: string): Promise<StatusResult> {

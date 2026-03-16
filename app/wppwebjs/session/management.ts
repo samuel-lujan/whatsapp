@@ -4,7 +4,7 @@ import type { Client } from "whatsapp-web.js";
 import type { ChatIdResult, ClearAllResult, ClearResult, DeleteAllResult } from "../interfaces";
 import { safeDestroyClient } from "./handlers";
 import { findCorrectChatId } from "../number-utils";
-import { sessions } from "./sessions";
+import { sessions } from ".";
 import { raceWithTimeout } from "../../utils";
 
 export async function clearSession(companySlug: string): Promise<ClearResult> {

@@ -4,7 +4,7 @@ import type { AppError, SendResult } from "./interfaces";
 import { verifyClientHealth } from "./session/health";
 import { safeDestroyClient } from "./session/handlers";
 import { validateWhatsAppNumber } from "./number-utils";
-import { sessions } from "./session/sessions";
+import { sessions } from "./session";
 
 export async function sendMessage(
     companySlug: string,
