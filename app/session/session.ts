@@ -53,7 +53,7 @@ export class Session {
         client.on("error", onError(this));
         client.on("change_battery", onChangeBattery(this));
         if(hasAi){
-            client.on("message", onMessage(this.companySlug, this.client));
+            client.on("message", onMessage(this.companySlug, client));
         }
 
         this.client = client;
