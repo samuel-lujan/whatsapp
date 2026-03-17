@@ -15,6 +15,7 @@ import { sessions } from ".";
 import { raceWithTimeout } from "../utils";
 import { safeDestroyClient, createSession } from "./sessionLifecycle";
 import { waitForQrCode } from "./utils";
+import { verifyClientHealth } from "./sessionHealth";
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ async function createIfMissing(companySlug: string, hasAi: boolean = false): Pro
         await createSession(companySlug, hasAi);
         console.log(`⏳ Aguardando QR Code ou conexão automática para ${companySlug}...`);
         await waitForQrCode(companySlug, 20000);
+        return { connected: isSessionReady(companySlug) };
     } catch (error) {
         console.log(`⚠️ Erro ao criar sessão/aguardar QR Code para ${companySlug}:`, (error as Error).message);
         return {
@@ -110,7 +112,6 @@ export async function getStatus(companySlug: string, hasAi: boolean = false): Pr
             }
         } else if (!session) {
             result = await createIfMissing(companySlug, hasAi);
-
         } else if (session.ready) {
             console.log(`✅ Cliente ${companySlug} conectou durante o processo`);
             result.connected = true;
@@ -158,6 +159,22 @@ export function checkConnectionStatus(companySlug: string): ConnectionStatus {
 
     console.log(`❌ Verificação rápida: Cliente ${companySlug} não conectado`);
     return { connected: false };
+}
+
+export async function ensureConnected(companySlug: string): Promise<ConnectionStatus> {
+    let status = checkConnectionStatus(companySlug);
+    if (!status.connected) {
+        console.log(
+            `⚠️ Quick check retornou não conectado para ${companySlug}, fazendo verificação completa...`,
+        );
+        const healthCheck = await verifyClientHealth(companySlug);
+        if (healthCheck.healthy) {
+            console.log(`✅ Verificação de saúde confirmou que ${companySlug} está conectado`);
+            return { connected: true };
+        }
+        console.log(`❌ Verificação de saúde falhou para ${companySlug}:`, healthCheck.reason);
+    }
+    return status;
 }
 
 // ─── Management ───────────────────────────────────────────────────────────────

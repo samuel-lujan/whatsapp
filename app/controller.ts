@@ -78,38 +78,16 @@ export function createWhatsappController(rollbar: Rollbar) {
         try {
             console.log(`🔍 Verificando conexão da empresa ${companySlug} antes de enviar...`);
 
-            let quickStatus = sessionManagement.checkConnectionStatus(companySlug);
+            const connectionStatus = await sessionManagement.ensureConnected(companySlug);
 
-            if (!quickStatus.connected) {
-                console.log(
-                    `⚠️ Quick check retornou não conectado para ${companySlug}, fazendo verificação completa...`,
-                );
-
-                const healthCheck = await sessionManagement.verifyClientHealth(companySlug);
-
-                if (healthCheck.healthy) {
-                    console.log(
-                        `✅ Verificação de saúde confirmou que ${companySlug} está conectado`,
-                    );
-                    quickStatus = { connected: true };
-                } else {
-                    console.log(
-                        `❌ Verificação de saúde falhou para ${companySlug}:`,
-                        healthCheck.reason,
-                    );
-                }
-            }
-
-            if (!quickStatus.connected) {
+            if (!connectionStatus.connected) {
                 const errorMessage = `Empresa ${companySlug} não está conectada ao WhatsApp`;
-
                 console.error(errorMessage);
-
                 res.status(422).json({
                     error: "Empresa não conectada",
                     message: errorMessage,
                     companySlug,
-                    status: quickStatus.status || "disconnected",
+                    status: connectionStatus.status || "disconnected",
                     suggestion: `Conecte a empresa primeiro acessando: /status/${companySlug}`,
                 });
                 return;
@@ -132,29 +110,24 @@ export function createWhatsappController(rollbar: Rollbar) {
                 route: "/send-message/:companySlug",
             });
 
-            let statusCode = err.statusCode || 500;
-            if (!err.statusCode) {
-                if (
-                    err.message.includes("perdeu conexão") ||
-                    err.message.includes("não está conectada")
-                ) {
-                    statusCode = 422;
-                }
+            const statusCode =
+                err.statusCode ||
+                (err.message.includes("perdeu conexão") || err.message.includes("não está conectada")
+                    ? 422
+                    : 500);
+
+            const shouldRetry = err.shouldRetry ?? false;
+
+            let suggestion: string;
+            if (err.message.includes("/status/")) {
+                suggestion = "Reconecte usando a rota /status";
+            } else if (shouldRetry) {
+                suggestion = "Tente novamente em alguns segundos";
+            } else {
+                suggestion = `Verifique se a empresa ${companySlug} está conectada em /status/${companySlug}`;
             }
 
-            const shouldRetry = err.shouldRetry !== undefined ? err.shouldRetry : false;
-
-            res.status(statusCode).json({
-                error: err.message,
-                companySlug,
-                originalNumber: number,
-                shouldRetry,
-                suggestion: err.message.includes("/status/")
-                    ? "Reconecte usando a rota /status"
-                    : shouldRetry
-                      ? "Tente novamente em alguns segundos"
-                      : `Verifique se a empresa ${companySlug} está conectada em /status/${companySlug}`,
-            });
+            res.status(statusCode).json({ error: err.message, companySlug, originalNumber: number, shouldRetry, suggestion });
         }
     }
 
@@ -174,32 +147,26 @@ export function createWhatsappController(rollbar: Rollbar) {
 
     async function debugSession(req: Request, res: Response): Promise<void> {
         const { companySlug } = req.params as { companySlug: string };
+        const timestamp = new Date().toISOString();
         try {
             console.log(`🔍 Debug da sessão: ${companySlug}`);
             const debugInfo = await sessionManagement.debugSessionState(companySlug);
-            res.json({
-                companySlug,
-                debug: debugInfo,
-                timestamp: new Date().toISOString(),
-            });
+            res.json({ companySlug, debug: debugInfo, timestamp });
         } catch (error: any) {
-            res.status(500).json({
-                error: error.message,
-                companySlug,
-                timestamp: new Date().toISOString(),
-            });
+            res.status(500).json({ error: error.message, companySlug, timestamp });
         }
     }
 
     async function checkHealth(req: Request, res: Response): Promise<void> {
         const { companySlug } = req.params as { companySlug: string };
+        const timestamp = new Date().toISOString();
         try {
             console.log(`🩺 Verificando saúde do cliente: ${companySlug}`);
             const healthCheck = await sessionManagement.verifyClientHealth(companySlug);
             res.json({
                 companySlug,
                 health: healthCheck,
-                timestamp: new Date().toISOString(),
+                timestamp,
                 recommendation: healthCheck.healthy
                     ? "Cliente está funcionando normalmente"
                     : healthCheck.shouldReconnect
@@ -207,11 +174,7 @@ export function createWhatsappController(rollbar: Rollbar) {
                       : "Verifique os logs para mais detalhes",
             });
         } catch (error: any) {
-            res.status(500).json({
-                error: error.message,
-                companySlug,
-                timestamp: new Date().toISOString(),
-            });
+            res.status(500).json({ error: error.message, companySlug, timestamp });
         }
     }
 
@@ -220,28 +183,20 @@ export function createWhatsappController(rollbar: Rollbar) {
             companySlug: string;
             number: string;
         };
+        const timestamp = new Date().toISOString();
         try {
             console.log(`🔍 Buscando informações do número ${number} para empresa ${companySlug}`);
             const numberInfo = await sessionManagement.searchNumberInfo(companySlug, number);
-            res.json({
-                companySlug,
-                number,
-                info: numberInfo,
-                timestamp: new Date().toISOString(),
-            });
+            res.json({ companySlug, number, info: numberInfo, timestamp });
         } catch (error: any) {
             console.error(`❌ Erro ao buscar informações do número ${number}:`, error.message);
-            res.status(500).json({
-                error: error.message,
-                companySlug,
-                number,
-                timestamp: new Date().toISOString(),
-            });
+            res.status(500).json({ error: error.message, companySlug, number, timestamp });
         }
     }
 
     async function clearSession(req: Request, res: Response): Promise<void> {
         const { companySlug } = req.params as { companySlug: string };
+        const timestamp = new Date().toISOString();
         try {
             console.log(`🧹 Solicitação de limpeza da sessão: ${companySlug}`);
 
@@ -255,19 +210,14 @@ export function createWhatsappController(rollbar: Rollbar) {
                     companySlug,
                     details: result.details,
                     whatsappLoggedOut: result.whatsappLoggedOut,
-                    timestamp: new Date().toISOString(),
+                    timestamp,
                     recommendation: result.whatsappLoggedOut
                         ? "Sessão limpa e WhatsApp desconectado com sucesso"
                         : "Sessão limpa, mas verifique se o WhatsApp foi desconectado no celular",
                 });
             } else {
                 console.log(`⚠️ Falha ao limpar sessão ${companySlug}:`, result.message);
-                res.status(404).json({
-                    success: false,
-                    message: result.message,
-                    companySlug,
-                    timestamp: new Date().toISOString(),
-                });
+                res.status(404).json({ success: false, message: result.message, companySlug, timestamp });
             }
         } catch (error: any) {
             console.error(`❌ Erro ao limpar sessão ${companySlug}:`, error.message);
@@ -275,13 +225,14 @@ export function createWhatsappController(rollbar: Rollbar) {
             res.status(500).json({
                 error: error.message,
                 companySlug,
-                timestamp: new Date().toISOString(),
+                timestamp,
                 suggestion: "Tente novamente ou verifique se a sessão existe",
             });
         }
     }
 
     async function clearAll(req: Request, res: Response): Promise<void> {
+        const timestamp = new Date().toISOString();
         try {
             console.log(`🧹 Solicitação de limpeza de TODAS as sessões`);
 
@@ -293,7 +244,7 @@ export function createWhatsappController(rollbar: Rollbar) {
                 message: result.message,
                 summary: result.summary,
                 details: result.sessions,
-                timestamp: new Date().toISOString(),
+                timestamp,
                 recommendation:
                     result.summary && result.summary.withLogout > 0
                         ? `${result.summary.withLogout} sessões desconectadas do WhatsApp com sucesso`
@@ -302,15 +253,12 @@ export function createWhatsappController(rollbar: Rollbar) {
         } catch (error: any) {
             console.error(`❌ Erro ao limpar todas as sessões:`, error.message);
             rollbar.error(error, { route: "/clear-all" });
-            res.status(500).json({
-                error: error.message,
-                timestamp: new Date().toISOString(),
-                suggestion: "Tente limpar as sessões individualmente",
-            });
+            res.status(500).json({ error: error.message, timestamp, suggestion: "Tente limpar as sessões individualmente" });
         }
     }
 
     async function deleteAll(req: Request, res: Response): Promise<void> {
+        const timestamp = new Date().toISOString();
         try {
             console.log(`🗑️ Solicitação de EXCLUSÃO de todas as empresas e sessões`);
 
@@ -322,18 +270,14 @@ export function createWhatsappController(rollbar: Rollbar) {
                 message: result.message,
                 summary: result.summary,
                 details: result.details,
-                timestamp: new Date().toISOString(),
+                timestamp,
                 warning:
                     "Todos os dados de autenticação foram removidos. As empresas precisarão escanear o QR Code novamente.",
             });
         } catch (error: any) {
             console.error(`❌ Erro ao deletar todas as empresas e sessões:`, error.message);
             rollbar.error(error, { route: "/delete-all" });
-            res.status(500).json({
-                error: error.message,
-                timestamp: new Date().toISOString(),
-                suggestion: "Tente novamente ou verifique os logs do servidor",
-            });
+            res.status(500).json({ error: error.message, timestamp, suggestion: "Tente novamente ou verifique os logs do servidor" });
         }
     }
 
