@@ -1,5 +1,5 @@
 import { Session } from "./session";
-import { zombieSessionMonitor } from "./sessionManagement";
+import { zombieSessionMonitor } from "./sessionHealth";
 
 // === Configuracao de reconnect ===
 export const HEALTH_CHECK_INTERVAL_MS = 60000; // 1 minuto
@@ -25,4 +25,7 @@ export const sessions: Record<string, Session> = {};
 setInterval(zombieSessionMonitor, HEALTH_CHECK_INTERVAL_MS);
 
 export * from "./session";
+export * from "./utils";
+export * from "./sessionLifecycle";
+export * from "./sessionHealth";
 export * from "./sessionManagement";

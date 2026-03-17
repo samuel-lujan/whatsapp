@@ -1,5 +1,4 @@
 import { Client, LocalAuth } from "whatsapp-web.js";
-import { sessions } from ".";
 import { onQr, onAuthenticated, onReady, onDisconnected, onAuthFailure, onChangeState, onError, onChangeBattery, onMessage } from "./clientHandlers";
 
 export class Session {

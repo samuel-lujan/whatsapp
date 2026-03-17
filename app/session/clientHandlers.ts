@@ -1,11 +1,10 @@
 import type { Client, Message } from "whatsapp-web.js";
-import { getAiResponse } from "../langchain";
-import { safeDestroyClient, scheduleReconnect } from ".";
+import { getAiResponse } from "../langchain/langchain";
+import { safeDestroyClient, scheduleReconnect, Session } from ".";
 import { PERMANENT_FAILURE_REASONS } from ".";
 import { raceWithTimeout } from "../utils";
-import type { SessionState } from "../types";
 
-export function onQr(session: SessionState) {
+export function onQr(session: Session) {
     return (qr: string) => {
         console.log(`QR Code gerado para empresa: ${session.companySlug}`);
         session.qrCode = qr;
@@ -18,14 +17,11 @@ export function onAuthenticated(companySlug: string) {
     };
 }
 
-export function onReady(session: SessionState) {
+export function onReady(session: Session) {
     return async () => {
         console.log(`✅ WhatsApp conectado para empresa: ${session.companySlug}`);
         if (session) {
-            session.ready = true;
-            session.connecting = false;
-            session.qrCode = null;
-
+            session.markAsReady();
             try {
                 const info = session.client.info;
                 console.log(`📱 Cliente ${session.companySlug} conectado como: ${info.wid._serialized}`);
@@ -36,7 +32,7 @@ export function onReady(session: SessionState) {
     };
 }
 
-export function onDisconnected(session: SessionState) {
+export function onDisconnected(session: Session) {
     return async (reason: string) => {
         console.log(`[EVENT] ${session.companySlug} disconnected: ${reason}`);
         if (!session) return;
@@ -71,7 +67,7 @@ export function onAuthFailure(companySlug: string) {
     };
 }
 
-export function onChangeState(session: SessionState) {
+export function onChangeState(session: Session) {
     return (state: string) => {
         console.log(`[EVENT] ${session.companySlug} state changed: ${state}`);
         if (!session) return;
@@ -88,7 +84,7 @@ export function onChangeState(session: SessionState) {
     };
 }
 
-export function onError(session: SessionState) {
+export function onError(session: Session) {
     return async (error: Error) => {
         console.log(`[EVENT] ${session.companySlug} error: ${error.message}`);
         if (!session) return;
@@ -96,11 +92,8 @@ export function onError(session: SessionState) {
         session.ready = false;
         session.connecting = false;
 
-        const isBrowserError =
-            error.message.includes("Protocol error") ||
-            error.message.includes("Target closed") ||
-            error.message.includes("Session closed") ||
-            error.message.includes("Navigation failed");
+        const browserErrors = ["Protocol error", "Target closed", "Session closed", "Navigation failed"];
+        const isBrowserError = browserErrors.some(e => error.message.includes(e));
 
         if (isBrowserError) {
             session.lastDisconnectTime = Date.now();
@@ -110,7 +103,7 @@ export function onError(session: SessionState) {
     };
 }
 
-export function onChangeBattery(session: SessionState) {
+export function onChangeBattery(session: Session) {
     return (_batteryInfo: unknown) => {
         session.lastBatteryUpdate = Date.now();
     };

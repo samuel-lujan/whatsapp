@@ -1,53 +1,12 @@
 import { Client } from "@langchain/langgraph-sdk";
 import crypto from "crypto";
-import { transcribeAudio } from "./transcribe";
-import type { Message, Chat } from "whatsapp-web.js";
+import { transcribeAudio } from "../transcription";
+import type { Message } from "whatsapp-web.js";
+import { clearCellphone, getRealPhoneNumber, prepareInput } from "./utils";
+import { APP_TOKEN, BETA_HASH, BETA_HASH_2, API_URLS, TRANSCRIPTION, assistantId } from "./constants";
 
 const client = new Client({ apiUrl: "http://localhost:2024" });
-// Using the graph deployed with the name "agent"
-const assistantId = "fe096781-5601-53d2-b2f6-0d3403f7e9ca";
-
-interface Session {
-    sessionId: string;
-    threadId: string;
-    authToken: string;
-    lastUpdate: number;
-    userName: string;
-    isAbleToAiResponse: boolean;
-    apiUrl: string;
-}
-
-interface UserData {
-    name: string;
-    is_able_to_ai_response: boolean;
-}
-
-interface LoginData {
-    token: string;
-}
-
-interface AiResponse {
-    success: boolean;
-    body?: string;
-}
-
-const CHAT_CACHE: Session[] = [];
-
-const APP_TOKEN = process.env.APP_TOKEN;
-const BETA_HASH = process.env.BETA_HASH;
-const BETA_HASH_2 = process.env.BETA_HASH_2;
-const TRANSCRIPTION = process.env.TRANSCRIPTION === "true";
-
-function getApiUrl(companySlug: string): string {
-    switch (companySlug) {
-        case "studio-homolog":
-            return "https://homolog.samuellujan.com.br/api";
-        case "lesma":
-            return "https://homolog.samuellujan.com.br/api";
-        default:
-            return "https://www.jusilveiraspinning.com.br/api";
-    }
-}
+const CHAT_CACHE: ChatSession[] = [];
 
 async function cellphoneLogin(url: string, cellphone: string): Promise<string> {
     const cleanedCellphone = clearCellphone(cellphone);
@@ -103,21 +62,12 @@ async function postLogin(url: string, body: { cellphone: string }): Promise<Logi
     return (await response.json()) as LoginData;
 }
 
-function clearCellphone(cellphone: string): string {
-    let cleanedCellphone = cellphone.replace(/\D/g, "");
-    if (cleanedCellphone.startsWith("55")) {
-        cleanedCellphone = cleanedCellphone.slice(2);
-    }
-    //console.log("Cleaned Cellphone: ", cleanedCellphone);
-    return cleanedCellphone;
-}
-
 async function getSession(
     companySlug: string,
     msgFrom: string,
     msgTo: string,
     msgTimestamp: number,
-): Promise<Session | null> {
+): Promise<ChatSession | null> {
     const receiver_hash = crypto.createHash("sha256").update(`${msgTo}`, "utf8").digest("hex");
 
     console.log("Receiver hash: ", receiver_hash);
@@ -149,7 +99,7 @@ async function getSession(
     }
 
     try {
-        const apiUrl = getApiUrl(companySlug);
+        const apiUrl = API_URLS[companySlug] || API_URLS.default;
         const authToken = await cellphoneLogin(apiUrl, msgFrom);
         const user = await getNameAndPermissions(apiUrl, authToken);
         console.log(authToken);
@@ -164,7 +114,7 @@ async function getSession(
                 throw new Error("Thread não foi criada!");
             }
 
-            const newSession: Session = {
+            const newSession: ChatSession = {
                 sessionId: sessionId,
                 threadId: thread.thread_id,
                 authToken: authToken,
@@ -187,43 +137,6 @@ async function getSession(
         console.log((e as Error).message);
     }
     return null;
-}
-
-function prepareInput(
-    message: string,
-    token: string,
-    name: string,
-    url: string,
-): {
-    messages: Array<{ role: string; content: string }>;
-    auth_token: string;
-    user_name: string;
-    api_url: string;
-} {
-    return {
-        messages: [{ role: "user", content: message }],
-        auth_token: token,
-        user_name: name,
-        api_url: url,
-    };
-}
-
-async function getRealPhoneNumber(message: Message): Promise<string> {
-    // Se for LID, precisamos obter o número real do contato
-    if (message.from.endsWith("@lid")) {
-        try {
-            const contact = await message.getContact();
-            // contact.number contém o número real (ex: "5511999999999")
-            if (contact.number) {
-                console.log(`📱 LID detectado. Número real: ${contact.number}`);
-                return contact.number;
-            }
-        } catch (e) {
-            console.error("Erro ao obter contato do LID:", (e as Error).message);
-        }
-    }
-    // Se não for LID ou não conseguir obter, usa o from original
-    return message.from;
 }
 
 export async function getAiResponse(message: Message, companySlug: string): Promise<AiResponse> {
