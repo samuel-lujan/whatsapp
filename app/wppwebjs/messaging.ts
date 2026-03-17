@@ -3,6 +3,14 @@ import path from "path";
 import type { AppError, SendResult } from "../types";
 import { verifyClientHealth, safeDestroyClient, Session } from "../session";
 import { validateWhatsAppNumber } from "./number-utils";
+import { errMsg } from "../utils";
+
+function makeAppError(message: string, statusCode: number, shouldRetry: boolean): AppError {
+    const err = new Error(message) as AppError;
+    err.statusCode = statusCode;
+    err.shouldRetry = shouldRetry;
+    return err;
+}
 
 export async function sendMessage(
     companySlug: string,
@@ -11,21 +19,17 @@ export async function sendMessage(
     session: Session
 ): Promise<SendResult> {
     if (!session) {
-        const err = new Error(
+        throw makeAppError(
             `Empresa ${companySlug} não existe. Acesse /status/${companySlug} para criar sessão.`,
-        ) as AppError;
-        err.shouldRetry = false;
-        err.statusCode = 422;
-        throw err;
+            422, false,
+        );
     }
 
     if (!session.ready) {
-        const err = new Error(
+        throw makeAppError(
             `Empresa ${companySlug} não está conectada ao WhatsApp. Acesse /status/${companySlug} para reconectar.`,
-        ) as AppError;
-        err.shouldRetry = false;
-        err.statusCode = 422;
-        throw err;
+            422, false,
+        );
     }
 
     console.log(`📤 Iniciando envio para ${companySlug} (ready=${session.ready})`);
@@ -72,9 +76,7 @@ export async function sendMessage(
             };
             console.log(`👤 Informações do contato: ${contactInfo.pushname}`);
         } catch (e) {
-            console.log(
-                `⚠️ Não foi possível obter informações do contato: ${(e as Error).message}`,
-            );
+            console.log(`⚠️ Não foi possível obter informações do contato: ${errMsg(e)}`);
         }
 
         return {
@@ -140,7 +142,7 @@ export async function sendMessage(
                     };
                 }
             } catch (retryError) {
-                console.error(`❌ Erro no retry:`, (retryError as Error).message);
+                console.error(`❌ Erro no retry:`, errMsg(retryError));
             }
 
             console.log(
@@ -159,17 +161,13 @@ export async function sendMessage(
                 await fs.promises.rm(authDir, { recursive: true, force: true });
                 console.log(`🗑️ Auth data removido: ${authDir}`);
             } catch (cleanErr) {
-                console.log(
-                    `⚠️ Erro ao limpar auth data de ${companySlug}: ${(cleanErr as Error).message}`,
-                );
+                console.log(`⚠️ Erro ao limpar auth data de ${companySlug}: ${errMsg(cleanErr)}`);
             }
 
-            const connErr = new Error(
+            throw makeAppError(
                 `Falha ao enviar mensagem. Sessão ${companySlug} foi encerrada. Acesse /status/${companySlug} para escanear novo QR Code.`,
-            ) as AppError;
-            connErr.shouldRetry = false;
-            connErr.statusCode = 422;
-            throw connErr;
+                422, false,
+            );
         }
 
         const timeoutErrors = [
@@ -198,22 +196,18 @@ export async function sendMessage(
                     session.ready = false;
                 }
 
-                const connErr = new Error(
+                throw makeAppError(
                     `Cliente ${companySlug} perdeu conexão (timeout). Acesse /status/${companySlug} para reconectar.`,
-                ) as AppError;
-                connErr.shouldRetry = false;
-                connErr.statusCode = 422;
-                throw connErr;
+                    422, false,
+                );
             } else {
                 console.log(
                     `✅ Cliente ${companySlug} ainda está saudável após timeout - erro temporário`,
                 );
-                const tempErr = new Error(
+                throw makeAppError(
                     `Timeout temporário ao enviar mensagem. A conexão está OK - tente novamente.`,
-                ) as AppError;
-                tempErr.shouldRetry = true;
-                tempErr.statusCode = 422;
-                throw tempErr;
+                    422, true,
+                );
             }
         }
 
@@ -233,18 +227,13 @@ export async function sendMessage(
                 session.ready = false;
             }
 
-            const connErr = new Error(
+            throw makeAppError(
                 `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`,
-            ) as AppError;
-            connErr.shouldRetry = false;
-            connErr.statusCode = 422;
-            throw connErr;
+                422, false,
+            );
         }
 
         console.log(`⚠️ Erro desconhecido ao enviar para ${companySlug}: ${err.message}`);
-        const unknownErr = new Error(`Erro ao enviar mensagem: ${err.message}`) as AppError;
-        unknownErr.shouldRetry = true;
-        unknownErr.statusCode = 422;
-        throw unknownErr;
+        throw makeAppError(`Erro ao enviar mensagem: ${err.message}`, 422, true);
     }
 }

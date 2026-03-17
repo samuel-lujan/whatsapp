@@ -1,5 +1,6 @@
 import type { Client } from "whatsapp-web.js";
 import type { ChatIdResult, ValidationResult } from "../types";
+import { errMsg } from "../utils";
 
 export async function findCorrectChatId(client: Client, number: string): Promise<ChatIdResult> {
     const cleanNumber = number.replace(/\D/g, "");
@@ -64,14 +65,11 @@ export async function findCorrectChatId(client: Client, number: string): Promise
             };
         }
     } catch (error) {
-        console.log(
-            `⚠️ Erro ao buscar chat/contato, usando formato padrão:`,
-            (error as Error).message,
-        );
+        console.log(`⚠️ Erro ao buscar chat/contato, usando formato padrão:`, errMsg(error));
         return {
             chatId: `${cleanNumber}@c.us`,
             isExistingChat: false,
-            error: (error as Error).message,
+            error: errMsg(error),
         };
     }
 }
@@ -150,7 +148,7 @@ export async function validateWhatsAppNumber(
                 };
             }
         } catch (error) {
-            console.log(`❌ Erro ao testar ${variation}: ${(error as Error).message}`);
+            console.log(`❌ Erro ao testar ${variation}: ${errMsg(error)}`);
         }
     }
 

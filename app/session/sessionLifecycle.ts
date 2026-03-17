@@ -1,6 +1,6 @@
 import { Session } from "./session";
 import { sessions, RECONNECT_CONFIG } from ".";
-import { raceWithTimeout } from "../utils";
+import { raceWithTimeout, errMsg } from "../utils";
 import { killOrphanChromeProcesses } from "./utils";
 
 export async function safeDestroyClient(companySlug: string): Promise<void> {
@@ -27,7 +27,7 @@ export async function safeDestroyClient(companySlug: string): Promise<void> {
         await raceWithTimeout(client.destroy(), 10000, "destroy timeout");
         console.log(`[DESTROY] ${companySlug}: client.destroy() ok`);
     } catch (e) {
-        console.log(`[DESTROY] ${companySlug}: client.destroy() falhou: ${(e as Error).message}`);
+        console.log(`[DESTROY] ${companySlug}: client.destroy() falhou: ${errMsg(e)}`);
 
         try {
             if (client.pupBrowser) {
@@ -41,7 +41,7 @@ export async function safeDestroyClient(companySlug: string): Promise<void> {
                 killOrphanChromeProcesses(companySlug, "DESTROY");
             }
         } catch (killErr) {
-            console.log(`[DESTROY] ${companySlug}: force-kill falhou: ${(killErr as Error).message}`);
+            console.log(`[DESTROY] ${companySlug}: force-kill falhou: ${errMsg(killErr)}`);
         }
     }
 
@@ -80,16 +80,14 @@ export async function scheduleReconnect(companySlug: string, reason: string): Pr
             if (sessions[companySlug]?.ready) {
                 console.log(`[RECONNECT] ${companySlug}: reconectou com sucesso!`);
                 sessions[companySlug].reconnectAttempts = 0;
-            } else if (sessions[companySlug]) {
-                sessions[companySlug].reconnectAttempts = attempt + 1;
-                await scheduleReconnect(companySlug, reason);
+                return;
             }
         } catch (err) {
-            console.log(`[RECONNECT] ${companySlug}: tentativa falhou: ${(err as Error).message}`);
-            if (sessions[companySlug]) {
-                sessions[companySlug].reconnectAttempts = attempt + 1;
-                await scheduleReconnect(companySlug, reason);
-            }
+            console.log(`[RECONNECT] ${companySlug}: tentativa falhou: ${errMsg(err)}`);
+        }
+        if (sessions[companySlug]) {
+            sessions[companySlug].reconnectAttempts = attempt + 1;
+            await scheduleReconnect(companySlug, reason);
         }
     }, delay);
 }

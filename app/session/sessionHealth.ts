@@ -1,7 +1,7 @@
 import type { WAState } from "whatsapp-web.js";
 import type { HealthResult } from "../types";
 import { sessions } from ".";
-import { raceWithTimeout } from "../utils";
+import { raceWithTimeout, errMsg } from "../utils";
 import { safeDestroyClient, scheduleReconnect } from "./sessionLifecycle";
 
 export async function verifyClientHealth(companySlug: string): Promise<HealthResult> {
@@ -21,7 +21,7 @@ export async function verifyClientHealth(companySlug: string): Promise<HealthRes
                     return { healthy: false, reason: "Página do browser fechada", shouldReconnect: true };
                 }
             } catch (e) {
-                console.log(`⚠️ Erro ao verificar página do browser para ${companySlug}:`, (e as Error).message);
+                console.log(`⚠️ Erro ao verificar página do browser para ${companySlug}:`, errMsg(e));
             }
         }
 
@@ -53,7 +53,7 @@ export async function verifyClientHealth(companySlug: string): Promise<HealthRes
                 return { healthy: true, state: state ?? "ASSUMED_CONNECTED", info: info.wid._serialized };
             }
         } catch (e) {
-            console.log(`⚠️ Não conseguiu obter info do cliente ${companySlug}: ${(e as Error).message}`);
+            console.log(`⚠️ Não conseguiu obter info do cliente ${companySlug}: ${errMsg(e)}`);
         }
 
         try {
@@ -64,7 +64,7 @@ export async function verifyClientHealth(companySlug: string): Promise<HealthRes
                 return { healthy: true, state: state ?? "FUNCTIONAL", info: `${chats.length} chats` };
             }
         } catch (e) {
-            console.log(`❌ Cliente ${companySlug} não conseguiu listar chats: ${(e as Error).message}`);
+            console.log(`❌ Cliente ${companySlug} não conseguiu listar chats: ${errMsg(e)}`);
         }
 
         console.log(`❌ Cliente ${companySlug} falhou em todas as verificações de saúde`);
@@ -74,8 +74,8 @@ export async function verifyClientHealth(companySlug: string): Promise<HealthRes
             shouldReconnect: true,
         };
     } catch (error) {
-        console.log(`❌ Cliente ${companySlug} falhou na verificação de saúde:`, (error as Error).message);
-        return { healthy: false, reason: (error as Error).message, shouldReconnect: true };
+        console.log(`❌ Cliente ${companySlug} falhou na verificação de saúde:`, errMsg(error));
+        return { healthy: false, reason: errMsg(error), shouldReconnect: true };
     }
 }
 
@@ -113,7 +113,7 @@ export async function zombieSessionMonitor(): Promise<void> {
                 try {
                     await raceWithTimeout(client.getState(), 8000, "health-check-timeout");
                 } catch (e) {
-                    console.log(`[HEALTH] ${slug}: ready mas sem resposta (${(e as Error).message}), agendando reconnect`);
+                    console.log(`[HEALTH] ${slug}: ready mas sem resposta (${errMsg(e)}), agendando reconnect`);
                     session.ready = false;
                     session.lastDisconnectTime = Date.now();
                     session.lastDisconnectReason = "health-check-failed";
@@ -129,7 +129,7 @@ export async function zombieSessionMonitor(): Promise<void> {
                 }
             }
         } catch (err) {
-            console.log(`[HEALTH] ${slug}: erro durante verificacao: ${(err as Error).message}`);
+            console.log(`[HEALTH] ${slug}: erro durante verificacao: ${errMsg(err)}`);
         }
     }
 }

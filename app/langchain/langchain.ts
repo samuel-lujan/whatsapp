@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { transcribeAudio } from "../transcription";
 import type { Message } from "whatsapp-web.js";
 import { clearCellphone, getRealPhoneNumber, prepareInput } from "./utils";
-import { APP_TOKEN, BETA_HASH, BETA_HASH_2, API_URLS, TRANSCRIPTION, assistantId } from "./constants";
+import { APP_TOKEN, BETA_HASH, BETA_HASH_2, API_URLS, TRANSCRIPTION, assistantId, SESSION_EXPIRY_SECONDS } from "./constants";
 
 const client = new Client({ apiUrl: "http://localhost:2024" });
 const CHAT_CACHE: ChatSession[] = [];
@@ -84,8 +84,7 @@ async function getSession(
 
     if (foundIndex > -1) {
         const nowTimestamp = Math.floor(Date.now() / 1000);
-        if (nowTimestamp - CHAT_CACHE[foundIndex].lastUpdate > 3600) {
-            //isExpired: 1 hora
+        if (nowTimestamp - CHAT_CACHE[foundIndex].lastUpdate > SESSION_EXPIRY_SECONDS) {
             CHAT_CACHE.splice(foundIndex, 1);
             console.log("Sessão expirada para o ID: ", sessionId);
         } else {

@@ -1,5 +1,6 @@
 import { execSync } from "child_process";
 import { sessions } from ".";
+import { errMsg } from "../utils";
 
 export function killOrphanChromeProcesses(companySlug: string, tag: string): void {
     try {
@@ -14,7 +15,7 @@ export function killOrphanChromeProcesses(companySlug: string, tag: string): voi
         execSync(`kill -9 ${pids.join(" ")} || true`, { timeout: 5000 });
         console.log(`[${tag}] ${companySlug}: processos órfãos eliminados`);
     } catch (e) {
-        console.log(`[${tag}] ${companySlug}: busca de processos órfãos falhou: ${(e as Error).message}`);
+        console.log(`[${tag}] ${companySlug}: busca de processos órfãos falhou: ${errMsg(e)}`);
     }
 }
 

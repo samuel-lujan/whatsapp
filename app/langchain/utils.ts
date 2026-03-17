@@ -1,4 +1,5 @@
 import { Message } from "whatsapp-web.js";
+import { errMsg } from "../utils";
 
 function clearCellphone(cellphone: string): string {
     let cleanedCellphone = cellphone.replace(/\D/g, "");
@@ -39,7 +40,7 @@ async function getRealPhoneNumber(message: Message): Promise<string> {
                 return contact.number;
             }
         } catch (e) {
-            console.error("Erro ao obter contato do LID:", (e as Error).message);
+            console.error("Erro ao obter contato do LID:", errMsg(e));
         }
     }
     // Se não for LID ou não conseguir obter, usa o from original

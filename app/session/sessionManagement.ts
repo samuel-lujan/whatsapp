@@ -12,10 +12,28 @@ import type {
 import { Session } from "./session";
 import { findCorrectChatId } from "../wppwebjs/number-utils";
 import { sessions } from ".";
-import { raceWithTimeout } from "../utils";
+import { raceWithTimeout, errMsg } from "../utils";
 import { safeDestroyClient, createSession } from "./sessionLifecycle";
 import { waitForQrCode } from "./utils";
 import { verifyClientHealth } from "./sessionHealth";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function removeDirectory(dirPath: string, label: string): Promise<{ deleted: boolean; error?: string }> {
+    try {
+        await fs.promises.rm(dirPath, { recursive: true, force: true });
+        console.log(`✅ Diretório de ${label} removido: ${dirPath}`);
+        return { deleted: true };
+    } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== "ENOENT") {
+            console.log(`⚠️ Erro ao remover diretório de ${label}: ${err.message}`);
+            return { deleted: false, error: err.message };
+        }
+        console.log(`ℹ️ Diretório de ${label} não existia`);
+        return { deleted: true };
+    }
+}
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
@@ -44,10 +62,10 @@ async function createIfMissing(companySlug: string, hasAi: boolean = false): Pro
         await waitForQrCode(companySlug, 20000);
         return { connected: isSessionReady(companySlug) };
     } catch (error) {
-        console.log(`⚠️ Erro ao criar sessão/aguardar QR Code para ${companySlug}:`, (error as Error).message);
+        console.log(`⚠️ Erro ao criar sessão/aguardar QR Code para ${companySlug}:`, errMsg(error));
         return {
             connected: false,
-            error: (error as Error).message,
+            error: errMsg(error),
             suggestion: "Tente novamente - o WhatsApp pode estar inicializando",
         };
     }
@@ -88,10 +106,10 @@ export async function getStatus(companySlug: string, hasAi: boolean = false): Pr
                     result.connected = true;
                 }
             } catch (e) {
-                console.log(`⚠️ Verificação alternativa falhou para ${companySlug}:`, (e as Error).message);
+                console.log(`⚠️ Verificação alternativa falhou para ${companySlug}:`, errMsg(e));
             }
         } catch (error) {
-            const msg = (error as Error).message;
+            const msg = errMsg(error);
             console.log(`⚠️ Cliente ${companySlug} não está realmente conectado:`, msg);
 
             if (msg.includes("null") || msg.includes("destroyed") || msg === "timeout") {
@@ -107,7 +125,7 @@ export async function getStatus(companySlug: string, hasAi: boolean = false): Pr
                 if (qrCode) {
                     console.log(`📱 Cliente ${companySlug} ainda conectando - QR Code disponível`);
                     result.qrCode = qrCode;
-                    result.status = "connecting"; 
+                    result.status = "connecting";
                 }
             }
         } else if (!session) {
@@ -117,7 +135,9 @@ export async function getStatus(companySlug: string, hasAi: boolean = false): Pr
             result.connected = true;
         }
 
-        result = returnQRCodeStatus(session);
+        if (session) {
+            result = returnQRCodeStatus(session);
+        }
     }
 
     return result;
@@ -148,7 +168,7 @@ export function checkConnectionStatus(companySlug: string): ConnectionStatus {
                 };
             }
         } catch (e) {
-            console.log(`⚠️ Erro na verificação rápida do cliente ${companySlug}:`, (e as Error).message);
+            console.log(`⚠️ Erro na verificação rápida do cliente ${companySlug}:`, errMsg(e));
         }
     }
 
@@ -196,7 +216,7 @@ export async function clearSession(companySlug: string): Promise<ClearResult> {
             logoutSuccess = true;
             console.log(`[CLEAR] ${companySlug}: logout ok`);
         } catch (e) {
-            console.log(`[CLEAR] ${companySlug}: logout falhou: ${(e as Error).message}`);
+            console.log(`[CLEAR] ${companySlug}: logout falhou: ${errMsg(e)}`);
         }
     }
 
@@ -229,8 +249,8 @@ export async function clearAllSessions(): Promise<ClearAllResult> {
             } catch (error) {
                 results[companySlug] = {
                     success: false,
-                    message: `Erro ao limpar sessão: ${(error as Error).message}`,
-                    error: (error as Error).message,
+                    message: `Erro ao limpar sessão: ${errMsg(error)}`,
+                    error: errMsg(error),
                 };
             }
         }),
@@ -278,43 +298,19 @@ export async function deleteAllCompaniesAndSessions(): Promise<DeleteAllResult> 
         } catch (error) {
             results.sessionsCleared[companySlug] = {
                 success: false,
-                message: (error as Error).message,
-                error: (error as Error).message,
+                message: errMsg(error),
+                error: errMsg(error),
             };
         }
     }
 
-    const authPath = path.resolve(__dirname, "..", ".wwebjs_auth");
-    try {
-        await fs.promises.rm(authPath, { recursive: true, force: true });
-        results.authDataDeleted = true;
-        console.log(`✅ Diretório de autenticação removido: ${authPath}`);
-    } catch (error) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code !== "ENOENT") {
-            console.log(`⚠️ Erro ao remover diretório de autenticação: ${err.message}`);
-            results.authDataError = err.message;
-        } else {
-            results.authDataDeleted = true;
-            console.log(`ℹ️ Diretório de autenticação não existia`);
-        }
-    }
+    const authResult = await removeDirectory(path.resolve(__dirname, "..", ".wwebjs_auth"), "autenticação");
+    results.authDataDeleted = authResult.deleted;
+    if (authResult.error) results.authDataError = authResult.error;
 
-    const cachePath = path.resolve(__dirname, "..", ".wwebjs_cache");
-    try {
-        await fs.promises.rm(cachePath, { recursive: true, force: true });
-        results.cacheDeleted = true;
-        console.log(`✅ Diretório de cache removido: ${cachePath}`);
-    } catch (error) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code !== "ENOENT") {
-            console.log(`⚠️ Erro ao remover diretório de cache: ${err.message}`);
-            results.cacheError = err.message;
-        } else {
-            results.cacheDeleted = true;
-            console.log(`ℹ️ Diretório de cache não existia`);
-        }
-    }
+    const cacheResult = await removeDirectory(path.resolve(__dirname, "..", ".wwebjs_cache"), "cache");
+    results.cacheDeleted = cacheResult.deleted;
+    if (cacheResult.error) results.cacheError = cacheResult.error;
 
     const successCount = Object.values(results.sessionsCleared).filter((r) => r.success).length;
 
@@ -360,7 +356,7 @@ export async function debugSessionState(companySlug: string): Promise<Record<str
             }
         } catch (error) {
             debug.realState = "ERROR";
-            debug.error = (error as Error).message;
+            debug.error = errMsg(error);
         }
     }
 
@@ -396,7 +392,8 @@ export async function searchNumberInfo(
     };
 
     try {
-        const chats = await client.getChats();
+        const [chats, contacts] = await Promise.all([client.getChats(), client.getContacts()]);
+
         for (const chat of chats) {
             if (chat.id.user === cleanNumber) {
                 info.searchResults.chats.push({
@@ -410,7 +407,6 @@ export async function searchNumberInfo(
             }
         }
 
-        const contacts = await client.getContacts();
         for (const contact of contacts) {
             if (contact.id.user === cleanNumber) {
                 info.searchResults.contacts.push({
@@ -427,14 +423,14 @@ export async function searchNumberInfo(
         try {
             info.searchResults.registrationStatus = await client.isRegisteredUser(`${cleanNumber}@c.us`);
         } catch (e) {
-            info.searchResults.registrationStatus = `Erro: ${(e as Error).message}`;
+            info.searchResults.registrationStatus = `Erro: ${errMsg(e)}`;
         }
 
         info.recommendedChatId = await findCorrectChatId(client, number);
 
         return info;
     } catch (error) {
-        throw new Error(`Erro ao buscar informações: ${(error as Error).message}`);
+        throw new Error(`Erro ao buscar informações: ${errMsg(error)}`);
     }
 }
 
@@ -443,20 +439,21 @@ export function getSession(companySlug: string): Session | null {
 }
 
 export function listSessions(): Record<string, Record<string, unknown>> {
-    const sessionList: Record<string, Record<string, unknown>> = {};
-    for (const [companySlug, session] of Object.entries(sessions)) {
-        sessionList[companySlug] = {
-            ready: session.ready,
-            connecting: session.connecting,
-            hasQrCode: !!session.qrCode,
-            lastBatteryUpdate: session.lastBatteryUpdate ?? null,
-            reconnectAttempts: session.reconnectAttempts || 0,
-            lastDisconnectReason: session.lastDisconnectReason ?? null,
-            lastDisconnectTime: session.lastDisconnectTime
-                ? new Date(session.lastDisconnectTime).toISOString()
-                : null,
-            hasPendingReconnect: !!session.reconnectTimer,
-        };
-    }
-    return sessionList;
+    return Object.fromEntries(
+        Object.entries(sessions).map(([companySlug, session]) => [
+            companySlug,
+            {
+                ready: session.ready,
+                connecting: session.connecting,
+                hasQrCode: !!session.qrCode,
+                lastBatteryUpdate: session.lastBatteryUpdate ?? null,
+                reconnectAttempts: session.reconnectAttempts || 0,
+                lastDisconnectReason: session.lastDisconnectReason ?? null,
+                lastDisconnectTime: session.lastDisconnectTime
+                    ? new Date(session.lastDisconnectTime).toISOString()
+                    : null,
+                hasPendingReconnect: !!session.reconnectTimer,
+            },
+        ]),
+    );
 }

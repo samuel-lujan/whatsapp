@@ -1,3 +1,5 @@
+export const errMsg = (e: unknown): string => (e as Error).message;
+
 export function raceWithTimeout<T>(
     promise: Promise<T>,
     ms: number,

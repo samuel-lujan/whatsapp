@@ -2,7 +2,7 @@ import type { Client, Message } from "whatsapp-web.js";
 import { getAiResponse } from "../langchain/langchain";
 import { safeDestroyClient, scheduleReconnect, Session } from ".";
 import { PERMANENT_FAILURE_REASONS } from ".";
-import { raceWithTimeout } from "../utils";
+import { raceWithTimeout, errMsg } from "../utils";
 
 export function onQr(session: Session) {
     return (qr: string) => {
@@ -42,14 +42,9 @@ export function onDisconnected(session: Session) {
         session.lastDisconnectTime = Date.now();
         session.lastDisconnectReason = reason;
 
-        const shouldReconect = (reason) => {
-            if (typeof reason === "string") {
-                return !PERMANENT_FAILURE_REASONS.includes(reason);
-            }
-            return true;
-        };
+        const shouldReconnect = typeof reason !== "string" || !PERMANENT_FAILURE_REASONS.includes(reason);
 
-        if (shouldReconect(reason)) {
+        if (shouldReconnect) {
             await scheduleReconnect(session.companySlug, reason);
         } else {
             console.log(
@@ -154,7 +149,7 @@ export function onMessage(companySlug: string, client: Client) {
         } catch (error) {
             console.error(
                 `❌ Erro ao processar mensagem para ${companySlug}:`,
-                (error as Error).message,
+                errMsg(error),
             );
         }
     };
