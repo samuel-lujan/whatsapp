@@ -3,10 +3,17 @@ import Rollbar from "rollbar";
 import * as whatsapp from "./wppwebjs";
 import * as sessionManagement from "./session";
 import qrcodeTerminal from "qrcode-terminal";
+import { StatusJson } from "./types";
 
 export function createWhatsappController(rollbar: Rollbar) {
     async function getStatus(req: Request, res: Response): Promise<void> {
         const { companySlug } = req.params as { companySlug: string };
+
+        const response: StatusJson = {
+            connected: false,
+            companySlug,
+            timestamp: new Date().toISOString(),
+        };
 
         try {
             console.log(`📊 Verificando status da empresa: ${companySlug}`);
@@ -15,67 +22,41 @@ export function createWhatsappController(rollbar: Rollbar) {
                 const quickStatus = sessionManagement.checkConnectionStatus(companySlug);
                 if (quickStatus.connected) {
                     console.log(`⚡ Empresa ${companySlug} já conectada (verificação rápida)`);
-                    res.json({
-                        connected: true,
-                        companySlug,
-                        method: "quick-check",
-                        timestamp: new Date().toISOString(),
-                    });
-                    return;
+                    response.method = "quick-check";
+                    response.connected = true;
                 }
-            }
-
-            const status = await sessionManagement.getStatus(companySlug);
-
-            if (status.connected) {
-                console.log(`✅ Empresa ${companySlug} está conectada`);
-                res.json({
-                    connected: true,
-                    companySlug,
-                    method: "full-check",
-                    timestamp: new Date().toISOString(),
-                });
             } else {
-                console.log(`⚠️ Empresa ${companySlug} não está conectada`);
 
-                const response: {
-                    connected: boolean;
-                    companySlug: string;
-                    timestamp: string;
-                    qrCode?: string | null;
-                    message?: string;
-                    error?: string;
-                    suggestion?: string;
-                } = {
-                    connected: false,
-                    companySlug,
-                    timestamp: new Date().toISOString(),
-                };
+                const status = await sessionManagement.getStatus(companySlug);
 
-                if (status.qrCode) {
-                    console.log(`📱 QR Code disponível para empresa ${companySlug}`);
-                    qrcodeTerminal.generate(status.qrCode, { small: true });
-                    response.qrCode = status.qrCode;
-                    response.message = "Escaneie o QR Code com o WhatsApp para conectar";
-                } else if (status.error) {
-                    response.error = status.error;
-                    response.message = status.suggestion || "Erro ao gerar QR Code";
+                if (status.connected) {
+                    console.log(`✅ Empresa ${companySlug} está conectada`);
+                    response.method = "full-check";
+                    response.connected = true;
                 } else {
-                    response.message = status.message || "Aguardando geração do QR Code...";
-                }
+                    console.log(`⚠️ Empresa ${companySlug} não está conectada`);
 
-                res.json(response);
+                    if (status.qrCode) {
+                        console.log(`📱 QR Code disponível para empresa ${companySlug}`);
+                        qrcodeTerminal.generate(status.qrCode, { small: true });
+                        response.qrCode = status.qrCode;
+                        response.message = "Escaneie o QR Code com o WhatsApp para conectar";
+                    } else if (status.error) {
+                        response.error = status.error;
+                        response.message = status.suggestion || "Erro ao gerar QR Code";
+                    } else {
+                        response.message = "Aguardando geração do QR Code...";
+                    }      
+                }
             }
         } catch (err: any) {
             console.error(`❌ Erro ao verificar status da empresa ${companySlug}:`, err.message);
             rollbar.error(err, { companySlug, route: "/status/:companySlug" });
-            res.status(500).json({
-                error: err.message,
-                companySlug,
-                timestamp: new Date().toISOString(),
-                suggestion: "Tente novamente em alguns segundos",
-            });
+            res.status(500);
+            response.error = err.message;
+            response.suggestion = "Tente novamente em alguns segundos";
         }
+        res.json(response);
     }
 
     async function sendMessage(req: Request, res: Response): Promise<void> {

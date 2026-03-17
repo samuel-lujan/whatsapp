@@ -18,6 +18,23 @@ import { waitForQrCode } from "./utils";
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
+async function waitForSessionReady(companySlug: string): Promise<boolean> {
+    console.log(`⏳ Cliente ${companySlug} ainda está conectando...`);
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+
+    return isSessionReady(companySlug);
+}
+
+function isSessionReady(companySlug: string) {
+    const session = sessions[companySlug];
+
+    if (session?.ready) {
+        console.log(`✅ Cliente ${companySlug} está conectado - não precisa de QR Code`);
+        return true;
+    }
+    return false;
+}
+
 async function createIfMissing(companySlug: string): Promise<StatusResult> {
     console.log(`🆕 Nenhuma sessão encontrada para ${companySlug} - criando nova...`);
     try {
@@ -52,12 +69,9 @@ function returnQRCodeStatus(session: Session) {
 
 export async function getStatus(companySlug: string): Promise<StatusResult> {
     const session = sessions[companySlug];
-    if (session?.ready) {
-        console.log(`✅ Cliente ${companySlug} está conectado - não precisa de QR Code`);
-        return { connected: true };
-    }
-
     const client = session?.client;
+
+    let result: StatusResult = { connected: false };
     if (client) {
         console.log(`🔍 Verificando estado real do cliente ${companySlug}...`);
 
@@ -69,12 +83,11 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
                 if (state === "CONNECTED" || client?.info?.wid) {
                     console.log(`🔧 Cliente ${companySlug} estava conectado mas não marcado como ready - corrigindo...`);
                     session.markAsReady();
-                    return { connected: true };
+                    result.connected = true;
                 }
             } catch (e) {
                 console.log(`⚠️ Verificação alternativa falhou para ${companySlug}:`, (e as Error).message);
             }
-            return { connected: false };
         } catch (error) {
             const msg = (error as Error).message;
             console.log(`⚠️ Cliente ${companySlug} não está realmente conectado:`, msg);
@@ -84,34 +97,30 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
                 await safeDestroyClient(companySlug);
             }
         }
-    }
+    } else {
+        if (session?.connecting && !session?.ready) {
+            result.connected = await waitForSessionReady(companySlug);
+            if (!result.connected) {
+                const qrCode = session?.qrCode;
+                if (qrCode) {
+                    console.log(`📱 Cliente ${companySlug} ainda conectando - QR Code disponível`);
+                    result.qrCode = qrCode;
+                    result.status = "connecting"; 
+                }
+            }
+        } else if (!session) {
+            result = await createIfMissing(companySlug);
 
-    if (session?.connecting && !session?.ready) {
-        console.log(`⏳ Cliente ${companySlug} ainda está conectando...`);
-        await new Promise<void>((resolve) => setTimeout(resolve, 3000));
-
-        if (session?.ready) {
-            console.log(`✅ Cliente ${companySlug} finalizou conexão durante a espera`);
-            return { connected: true };
+        } else if (session.ready) {
+            console.log(`✅ Cliente ${companySlug} conectou durante o processo`);
+            result.connected = true;
         }
 
-        const qrCode = session?.qrCode;
-        if (qrCode) {
-            console.log(`📱 Cliente ${companySlug} ainda conectando - QR Code disponível`);
-            return { connected: false, qrCode, status: "connecting" };
-        }
+        result = returnQRCodeStatus(session);
     }
 
-    if (!session) {
-        return createIfMissing(companySlug);
-    }
+    return result;
 
-    if (session?.ready) {
-        console.log(`✅ Cliente ${companySlug} conectou durante o processo`);
-        return { connected: true };
-    }
-
-    return returnQRCodeStatus(session);
 }
 
 export function hasActiveSession(companySlug: string): boolean {

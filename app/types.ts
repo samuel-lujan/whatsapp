@@ -11,10 +11,20 @@ export interface ConnectionStatus {
     suggestion?: string;
 }
 
+export interface StatusJson {
+    connected: boolean;
+    companySlug: string;
+    timestamp: string;
+    method?: "quick-check" | "full-check";
+    qrCode?: string;
+    message?: string;
+    error?: string;
+    suggestion?: string;
+}
+
 export interface StatusResult {
     connected: boolean;
-    qrCode?: string | null;
-    message?: string;
+    qrCode?: string;
     status?: string;
     error?: string;
     suggestion?: string;
