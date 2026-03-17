@@ -8,6 +8,7 @@ import { StatusJson } from "./types";
 export function createWhatsappController(rollbar: Rollbar) {
     async function getStatus(req: Request, res: Response): Promise<void> {
         const { companySlug } = req.params as { companySlug: string };
+        const hasAi = req.query.hasAi === "true";
 
         const response: StatusJson = {
             connected: false,
@@ -27,7 +28,7 @@ export function createWhatsappController(rollbar: Rollbar) {
                 }
             } else {
 
-                const status = await sessionManagement.getStatus(companySlug);
+                const status = await sessionManagement.getStatus(companySlug, hasAi);
 
                 if (status.connected) {
                     console.log(`✅ Empresa ${companySlug} está conectada`);

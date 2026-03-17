@@ -94,7 +94,7 @@ export async function scheduleReconnect(companySlug: string, reason: string): Pr
     }, delay);
 }
 
-export async function createSession(companySlug: string): Promise<void> {
+export async function createSession(companySlug: string, hasAi: boolean = false): Promise<void> {
     killOrphanChromeProcesses(companySlug, "CREATE");
     await new Promise<void>((resolve) => setTimeout(resolve, 1000));
 
@@ -104,7 +104,7 @@ export async function createSession(companySlug: string): Promise<void> {
     console.log(`🖥️ Ambiente: ${isProduction ? "PRODUÇÃO" : "DESENVOLVIMENTO"}`);
     console.log(`🌐 Browser: ${isHeadless ? "HEADLESS (sem interface)" : "COM INTERFACE"}`);
 
-    const session = new Session(companySlug, isHeadless);
+    const session = new Session(companySlug, isHeadless, hasAi);
     sessions[companySlug] = session;
     await session.initialize();
 }

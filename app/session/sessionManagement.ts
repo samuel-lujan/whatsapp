@@ -35,10 +35,10 @@ function isSessionReady(companySlug: string) {
     return false;
 }
 
-async function createIfMissing(companySlug: string): Promise<StatusResult> {
+async function createIfMissing(companySlug: string, hasAi: boolean = false): Promise<StatusResult> {
     console.log(`🆕 Nenhuma sessão encontrada para ${companySlug} - criando nova...`);
     try {
-        await createSession(companySlug);
+        await createSession(companySlug, hasAi);
         console.log(`⏳ Aguardando QR Code ou conexão automática para ${companySlug}...`);
         await waitForQrCode(companySlug, 20000);
     } catch (error) {
@@ -67,7 +67,7 @@ function returnQRCodeStatus(session: Session) {
     };
 }
 
-export async function getStatus(companySlug: string): Promise<StatusResult> {
+export async function getStatus(companySlug: string, hasAi: boolean = false): Promise<StatusResult> {
     const session = sessions[companySlug];
     const client = session?.client;
 
@@ -109,7 +109,7 @@ export async function getStatus(companySlug: string): Promise<StatusResult> {
                 }
             }
         } else if (!session) {
-            result = await createIfMissing(companySlug);
+            result = await createIfMissing(companySlug, hasAi);
 
         } else if (session.ready) {
             console.log(`✅ Cliente ${companySlug} conectou durante o processo`);

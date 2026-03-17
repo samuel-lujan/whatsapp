@@ -14,7 +14,7 @@ export class Session {
     lastDisconnectReason: string | null = null;
     lastBatteryUpdate?: number;
 
-    constructor(companySlug: string, isHeadless: boolean) {
+    constructor(companySlug: string, isHeadless: boolean, hasAi: boolean) {
         this.companySlug = companySlug;
 
         const client = new Client({
@@ -52,7 +52,9 @@ export class Session {
         client.on("change_state", onChangeState(this));
         client.on("error", onError(this));
         client.on("change_battery", onChangeBattery(this));
-        client.on("message", onMessage(this.companySlug, this.client));
+        if(hasAi){
+            client.on("message", onMessage(this.companySlug, this.client));
+        }
 
         this.client = client;
   }
