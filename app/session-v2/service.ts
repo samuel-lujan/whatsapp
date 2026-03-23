@@ -26,11 +26,11 @@ export function getSession(name: string): Session | null {
 }
 
 export async function waitForQrCode(session: Session, timeout = 30000): Promise<void> {
-    const logger = session.logger;
-    logger.tag = "QR_CODE";
+    const logger: Logger = session.logger;
+    const tag = "QR_CODE";
     return new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
-            logger.log(`⏰ Timeout ao aguardar QR Code após ${timeout / 1000}s`);
+            logger.log(`⏰ Timeout ao aguardar QR Code após ${timeout / 1000}s`, tag);
             reject(new Error(`Timeout ao gerar QR Code para ${session.name}. Tente novamente.`));
         }, timeout);
 
@@ -38,7 +38,7 @@ export async function waitForQrCode(session: Session, timeout = 30000): Promise<
             if (session && (session.qrCode || session.ready)) {
                 clearTimeout(timeoutId);
                 clearInterval(interval);
-                logger.log(`✅ QR Code gerado ou cliente conectado.`);
+                logger.log(`✅ QR Code gerado ou cliente conectado.`, tag);
                 resolve();
             }
 
@@ -52,7 +52,6 @@ export async function waitForQrCode(session: Session, timeout = 30000): Promise<
 }
 
 export function killOrphanChromeProcesses(company: string, tag: string, logger: Logger): void {
-    logger.tag = tag;
     try {
         const sessionDir = `session-${company}`;
         const grepSessionDir = `pgrep -f "${sessionDir}" || true`;
@@ -60,11 +59,11 @@ export function killOrphanChromeProcesses(company: string, tag: string, logger: 
         if (result) {
             const pids = result.split("\n").filter(Boolean);
             const killPIds = `kill -9 ${pids.join(" ")} || true`;
-            logger.log(`matando ${pids.length} processos Chrome órfãos: ${pids.join(", ")}`);
+            logger.log(`matando ${pids.length} processos Chrome órfãos: ${pids.join(", ")}`, tag);
             execSync(killPIds, { timeout: 5000 });
-            logger.log(`processos órfãos eliminados`);
+            logger.log(`processos órfãos eliminados`, tag);
         } else {
-            logger.log(`nenhum processo Chrome órfão encontrado`);
+            logger.log(`nenhum processo Chrome órfão encontrado`, tag);
         }
     } catch (e) {
         throw e;
@@ -74,11 +73,11 @@ export function killOrphanChromeProcesses(company: string, tag: string, logger: 
 export async function safeDestroyClient(session: Session): Promise<void> {
     const company = session.name;
     const logger = session.logger;
-    logger.tag = "DESTROY";
+    const tag = "DESTROY";
     if (!session?.client){
         sessionManager.removeSession(company);
     } else if (session?.destroying) {
-        logger.log(`ja esta sendo destruido, ignorando`);
+        logger.log(`ja esta sendo destruido, ignorando`, tag);
     } else {
         session.destroying = true;
 
@@ -101,12 +100,12 @@ export async function safeDestroyClient(session: Session): Promise<void> {
                 if (client.pupBrowser) {
                     const browserProcess = client.pupBrowser.process();
                     if (browserProcess) {
-                        logger.log(`forçando kill no Chrome PID ${browserProcess.pid}`);
+                        logger.log(`forçando kill no Chrome PID ${browserProcess.pid}`, tag);
                         browserProcess.kill("SIGKILL");
                     }
                 } else {
-                    logger.log(`pupBrowser null, buscando processos Chrome órfãos...`);
-                    killOrphanChromeProcesses(company, logger.tag, logger);
+                    logger.log(`pupBrowser null, buscando processos Chrome órfãos...`, tag);
+                    killOrphanChromeProcesses(company, tag, logger);
                 }
             } catch (killErr) {
                 throw killErr;
@@ -114,7 +113,7 @@ export async function safeDestroyClient(session: Session): Promise<void> {
         }
 
         sessionManager.removeSession(company);
-        logger.log(`sessao removida da memoria`);
+        logger.log(`sessao removida da memoria`, tag);
     }
 
 }
@@ -178,7 +177,7 @@ export async function createSession(name: string, hasAi: boolean = false): Promi
 
 export async function deleteSession(session: Session): Promise<{ success: boolean; message: string }> {
     const { logger } = session;
-    logger.tag = "DELETE";
+    const tag = "DELETE";
 
     const client = session.client;
     let logoutSuccess = false;
@@ -189,7 +188,7 @@ export async function deleteSession(session: Session): Promise<{ success: boolea
         try {
             await raceWithTimeout(client.logout(), 10000, "Timeout no logout");
             logoutSuccess = true;
-            logger.log(`logout ok`);
+            logger.log(`logout ok`, tag);
         } catch (e) {
             logger.log(`logout falhou: ${e}`);
         }
