@@ -1,5 +1,5 @@
 import { Client, LocalAuth, Message } from "whatsapp-web.js";
-import { Logger } from "./logging";
+import { Logger } from "../logging";
 import { getAiResponse } from "../langchain/langchain";
 import { raceWithTimeout, errMsg } from "../utils";
 import { PERMANENT_FAILURE_REASONS, scheduleReconnect, safeDestroyClient } from "./service";
@@ -74,28 +74,28 @@ export class Session {
     onQr() {
         return async (qr: string) => {
             this.qrCode = qr;
-            this.logger.tagLog("onQR", `QR Code gerado.`);
+            this.logger.log(`QR Code gerado.`, "onQR");
         };
     }
 
     onAuthenticated() {
         return () => {
-            this.logger.tagLog("onAUTH", `🔐 Cliente autenticado - aguardando ready...`);
+            this.logger.log(`🔐 Cliente autenticado - aguardando ready...`, "onAUTH");
         };
     }
 
     onReady() {
         return async () => {
             const tag = "onREADY";
-            this.logger.tagLog(tag, `✅ WhatsApp conectado.`);
+            this.logger.log(`✅ WhatsApp conectado.`, tag);
             if (this) {
                 this.ready = true;
                 this.connecting = false;
                 try {
                     const info = this.client.info;
-                    this.logger.tagLog(tag, `📱 Cliente conectado como: ${info.wid._serialized}`);
+                    this.logger.log(`📱 Cliente conectado como: ${info.wid._serialized}`, tag);
                 } catch (e) {
-                    this.logger.tagLog(tag, `⚠️ Cliente conectado mas sem info detalhada`);
+                    this.logger.log(`⚠️ Cliente conectado mas sem info detalhada`, tag);
                 }
             }
         };
@@ -104,7 +104,7 @@ export class Session {
     onDisconnected() {
         return async (reason: string) => {
             const tag = "onDISCONNECTED";
-            this.logger.tagLog(tag, `🔌 Cliente desconectado: ${reason}`);
+            this.logger.log(`🔌 Cliente desconectado: ${reason}`, tag);
             if (!this) return;
 
             this.ready = false;
@@ -120,7 +120,7 @@ export class Session {
                 this.lastDisconnectReason = this.lastDisconnectReason;
                 await scheduleReconnect(this, reason);
             } else {
-                this.logger.tagLog(tag, `⚠️ Falha permanente (${reason}), destruindo sem reconnect`);
+                this.logger.log(`⚠️ Falha permanente (${reason}), destruindo sem reconnect`, tag);
                 await safeDestroyClient(this);
             }
         };
@@ -129,7 +129,7 @@ export class Session {
     onAuthFailure() {
         return async (msg: string) => {
             const tag = "onAUTH_FAILURE";
-            this.logger.tagLog(tag, `⚠️ Auth_failure: ${msg}`);
+            this.logger.log(`⚠️ Auth_failure: ${msg}`, tag);
             if (!this) {
                 return;
             }
@@ -144,7 +144,7 @@ export class Session {
         const logger = this.logger;
         return async (state: string) => {
             const tag = "onCHANGE_STATE";
-            logger.tagLog(tag, `ℹ️ State changed: ${state}`);
+            logger.log(`ℹ️ State changed: ${state}`, tag);
             if (!this) return;
 
             if (state === "CONNECTED") {
@@ -162,7 +162,7 @@ export class Session {
     onError() {
         return async (error: Error) => {
             const tag = "onERROR";
-            this.logger.tagLog(tag, `❌ Error: ${error.message}`);
+            this.logger.log(`❌ Error: ${error.message}`, tag);
             if (!this) return;
 
             this.ready = false;
@@ -195,13 +195,13 @@ export class Session {
         return async (message: Message) => {
             const tag = "onMESSAGE";
             try {
-                this.logger.tagLog(tag, `📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`);
+                this.logger.log(`📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`, tag);
 
                 const isNewsletter = message.from.endsWith("@newsletter");
 
                 const isChatMessage = !message.isStatus && !message.broadcast && !isNewsletter;
                 if (!isChatMessage) {
-                    this.logger.tagLog(tag, `⚠️ Ignorando mensagem de tipo ${message.type} de ${message.from}`);
+                    this.logger.log(`⚠️ Ignorando mensagem de tipo ${message.type} de ${message.from}`, tag);
                     return;
                 }
 
@@ -216,7 +216,7 @@ export class Session {
                             15000,
                             "Timeout ao enviar mensagem - cliente pode ter desconectado",
                         );
-                        this.logger.tagLog(tag, `✅ Mensagem enviada com sucesso pelo cliente ${this.name}`);
+                        this.logger.log(`✅ Mensagem enviada com sucesso pelo cliente ${this.name}`, tag);
                         return;
                     }
                 }
@@ -224,13 +224,12 @@ export class Session {
                 const chat = await message.getChat();
                 if (typeof chat.markUnread === "function") {
                     await chat.markUnread();
-                    this.logger.tagLog(tag, `ℹ️ Mensagem marcada como não lida para atendimento humano - ${this.name}`);
+                    this.logger.log(`ℹ️ Mensagem marcada como não lida para atendimento humano - ${this.name}`, tag);
                 } else {
-                    this.logger.tagLog(tag, `ℹ️ Sem resposta da IA para ${this.name}, método markUnread não disponível nesta versão`,
-                    );
+                    this.logger.log(`ℹ️ Sem resposta da IA para ${this.name}, método markUnread não disponível nesta versão`, tag);
                 }
             } catch (error) {
-                this.logger.tagLog(tag, `❌ Erro ao processar mensagem: ${errMsg(error)}`);
+                this.logger.log(`❌ Erro ao processar mensagem: ${errMsg(error)}`, tag);
             }
         };
     }

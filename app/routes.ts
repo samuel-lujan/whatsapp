@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import Rollbar from "rollbar";
 import { createSessionController, deleteSessionController, getSessionController, listSessionsController, loadAllSessionsController } from "./session-v2/controller";
-import { Logger } from "./session-v2/logging";
+import { server } from "./logging";
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "sua-chave-secreta-aqui";
 
@@ -28,7 +28,7 @@ function authenticateToken(req: Request, res: Response, next: NextFunction): voi
     next();
 }
 
-export function createRouterV2(rollbar: Rollbar, logger: Logger): Router {
+export function createRouterV2(rollbar: Rollbar): Router {
     const router = Router();
 
     router.get("/v2/session/:company", authenticateToken, getSessionController);
@@ -40,13 +40,13 @@ export function createRouterV2(rollbar: Rollbar, logger: Logger): Router {
     router.get("/v2/sessions/", authenticateToken, listSessionsController);
     router.get("/v2/sessions/load", authenticateToken, loadAllSessionsController);
 
-    logger.jumpLineLog("Rotas disponíveis:");
-    logger.log("    GET   /v2/session/:company - obter sessão");
-    logger.log("    POST  /v2/session/:company - criar sessão");
-    logger.log("    POST  /v2/ai/session/:company - criar sessão atrelada à IA");
-    logger.log("    DELETE /v2/session/:company - deletar sessão");
-    logger.log("    GET /v2/sessions/ - listar sessões");
-    logger.log("    GET /v2/sessions/load - carregar todas as sessões");
+    server.jumpLineLog("Rotas disponíveis:");
+    server.log("    GET   /v2/session/:company - obter sessão");
+    server.log("    POST  /v2/session/:company - criar sessão");
+    server.log("    POST  /v2/ai/session/:company - criar sessão atrelada à IA");
+    server.log("    DELETE /v2/session/:company - deletar sessão");
+    server.log("    GET /v2/sessions/ - listar sessões");
+    server.log("    GET /v2/sessions/load - carregar todas as sessões");
 
     return router;
 }

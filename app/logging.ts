@@ -8,15 +8,10 @@ export class Logger {
         this.log(`Logger initialized`);
     }
 
-    log(msg: string) {
+    log(msg: string, tag: string = '') {
         const now = `${new Date().toLocaleTimeString()}`;
-        const tag = this.tag ? `[${this.tag}]` : '';
-        console.log(`${now} - [${this.origin}]${tag} - ${msg}`);
-    }
-
-    tagLog(tag: string, msg: string) {
-        const now = `${new Date().toLocaleTimeString()}`;
-        console.log(`${now} - [${this.origin}][${tag}] - ${msg}`);
+        const tagStr = tag ? `[${this.tag}]` : '';
+        console.log(`${now} - [${this.origin}]${tagStr} - ${msg}`);
     }
 
     jumpLineLog(msg: string) {

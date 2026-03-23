@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { createSession, deleteSession, getSession, listSessions, loadAllSessions } from "./service";
 import qrcodeTerminal from "qrcode-terminal";
-import { server } from "./logging";
+import { server } from "../logging";
 
 function returnSuccess(res: Response, data: unknown, args: Record<string, unknown> = {}) {
   return res.status(200).json({

@@ -1,7 +1,7 @@
 import {  Session } from "./session";
 import { raceWithTimeout } from "../utils";
 import { execSync } from "child_process";
-import { Logger, server } from "./logging";
+import { Logger, server } from "../logging";
 import { sessionManager } from "./sessionManager";
 
 export const RECONNECT_CONFIG = {
