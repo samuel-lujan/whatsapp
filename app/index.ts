@@ -38,17 +38,17 @@ app.listen(PORT, () => {
 // Graceful shutdown - limpa todas as sessoes/Chrome antes de sair
 let isShuttingDown = false;
 async function gracefulShutdown(signal: string): Promise<void> {
-    server.tag = "SHUTDOWN";
+    const tag = "SHUTDOWN";
     if (isShuttingDown) return;
     isShuttingDown = true;
 
-    server.jumpLineLog(`Recebido ${signal}, limpando todas as sessoes...`);
+    server.jumpLineLog(`Recebido ${signal}, limpando todas as sessoes...`, tag);
 
     try {
         await raceWithTimeout(clearAllSessions(), 30000, "shutdown timeout");
-        server.log(`Sessoes limpas com sucesso`);
+        server.log(`Sessoes limpas com sucesso`, tag);
     } catch (err: any) {
-        server.log(`Erro/timeout na limpeza: ${err.message}`);
+        server.log(`Erro/timeout na limpeza: ${err.message}`, tag);
     }
 
     // Ultimo recurso: mata processos Chrome orfaos
@@ -58,7 +58,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         // pkill retorna non-zero se nenhum processo encontrado
     }
 
-    server.log(`Saindo.`);
+    server.log(`Saindo.`, tag);
     process.exit(0);
 }
 
