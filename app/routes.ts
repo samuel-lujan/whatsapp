@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import Rollbar from "rollbar";
-import { createWhatsappController } from "./controller";
+import { createSessionController, deleteSessionController, getSessionController, listSessionsController, loadAllSessionsController } from "./session-v2/controller";
+import { Logger } from "./session-v2/logging";
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "sua-chave-secreta-aqui";
 
@@ -27,19 +28,25 @@ function authenticateToken(req: Request, res: Response, next: NextFunction): voi
     next();
 }
 
-export function createRouter(rollbar: Rollbar): Router {
+export function createRouterV2(rollbar: Rollbar, logger: Logger): Router {
     const router = Router();
-    const ctrl = createWhatsappController(rollbar);
 
-    router.get("/status/:companySlug", authenticateToken, ctrl.getStatus);
-    router.post("/send-message/:companySlug", authenticateToken, ctrl.sendMessage);
-    router.get("/companies", authenticateToken, ctrl.listCompanies);
-    router.get("/debug/:companySlug", authenticateToken, ctrl.debugSession);
-    router.get("/health/:companySlug", authenticateToken, ctrl.checkHealth);
-    router.get("/search-number/:companySlug/:number", authenticateToken, ctrl.searchNumber);
-    router.delete("/clear/:companySlug", authenticateToken, ctrl.clearSession);
-    router.delete("/clear-all", authenticateToken, ctrl.clearAll);
-    router.delete("/delete-all", authenticateToken, ctrl.deleteAll);
+    router.get("/v2/session/:company", authenticateToken, getSessionController);
+    router.post("/v2/session/:company", authenticateToken, (req, res) => 
+        createSessionController(req, res, false));
+    router.post("/v2/ai/session/:company", authenticateToken, (req, res) => 
+        createSessionController(req, res, true));
+    router.delete("/v2/session/:company", authenticateToken, deleteSessionController);
+    router.get("/v2/sessions/", authenticateToken, listSessionsController);
+    router.get("/v2/sessions/load", authenticateToken, loadAllSessionsController);
+
+    logger.jumpLineLog("Rotas disponíveis:");
+    logger.log("    GET   /v2/session/:company - obter sessão");
+    logger.log("    POST  /v2/session/:company - criar sessão");
+    logger.log("    POST  /v2/ai/session/:company - criar sessão atrelada à IA");
+    logger.log("    DELETE /v2/session/:company - deletar sessão");
+    logger.log("    GET /v2/sessions/ - listar sessões");
+    logger.log("    GET /v2/sessions/load - carregar todas as sessões");
 
     return router;
 }

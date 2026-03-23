@@ -16,19 +16,21 @@ export async function sendMessage(
     companySlug: string,
     number: string,
     message: string,
-    session: Session
+    session: Session,
 ): Promise<SendResult> {
     if (!session) {
         throw makeAppError(
             `Empresa ${companySlug} não existe. Acesse /status/${companySlug} para criar sessão.`,
-            422, false,
+            422,
+            false,
         );
     }
 
     if (!session.ready) {
         throw makeAppError(
             `Empresa ${companySlug} não está conectada ao WhatsApp. Acesse /status/${companySlug} para reconectar.`,
-            422, false,
+            422,
+            false,
         );
     }
 
@@ -166,7 +168,8 @@ export async function sendMessage(
 
             throw makeAppError(
                 `Falha ao enviar mensagem. Sessão ${companySlug} foi encerrada. Acesse /status/${companySlug} para escanear novo QR Code.`,
-                422, false,
+                422,
+                false,
             );
         }
 
@@ -198,7 +201,8 @@ export async function sendMessage(
 
                 throw makeAppError(
                     `Cliente ${companySlug} perdeu conexão (timeout). Acesse /status/${companySlug} para reconectar.`,
-                    422, false,
+                    422,
+                    false,
                 );
             } else {
                 console.log(
@@ -206,7 +210,8 @@ export async function sendMessage(
                 );
                 throw makeAppError(
                     `Timeout temporário ao enviar mensagem. A conexão está OK - tente novamente.`,
-                    422, true,
+                    422,
+                    true,
                 );
             }
         }
@@ -229,7 +234,8 @@ export async function sendMessage(
 
             throw makeAppError(
                 `Cliente ${companySlug} perdeu conexão com WhatsApp Web. Acesse /status/${companySlug} para reconectar.`,
-                422, false,
+                422,
+                false,
             );
         }
 

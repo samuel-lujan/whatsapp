@@ -3,7 +3,15 @@ import crypto from "crypto";
 import { transcribeAudio } from "../transcription";
 import type { Message } from "whatsapp-web.js";
 import { clearCellphone, getRealPhoneNumber, prepareInput } from "./utils";
-import { APP_TOKEN, BETA_HASH, BETA_HASH_2, API_URLS, TRANSCRIPTION, assistantId, SESSION_EXPIRY_SECONDS } from "./constants";
+import {
+    APP_TOKEN,
+    BETA_HASH,
+    BETA_HASH_2,
+    API_URLS,
+    TRANSCRIPTION,
+    assistantId,
+    SESSION_EXPIRY_SECONDS,
+} from "./constants";
 
 const client = new Client({ apiUrl: "http://localhost:2024" });
 const CHAT_CACHE: ChatSession[] = [];

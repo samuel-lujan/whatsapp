@@ -13,4 +13,12 @@ const API_URLS = {
     default: "https://www.jusilveiraspinning.com.br/api",
 };
 
-export { assistantId, APP_TOKEN, BETA_HASH, BETA_HASH_2, API_URLS, TRANSCRIPTION, SESSION_EXPIRY_SECONDS };
+export {
+    assistantId,
+    APP_TOKEN,
+    BETA_HASH,
+    BETA_HASH_2,
+    API_URLS,
+    TRANSCRIPTION,
+    SESSION_EXPIRY_SECONDS,
+};
