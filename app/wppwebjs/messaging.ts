@@ -1,9 +1,10 @@
 import fs from "fs";
 import path from "path";
 import type { AppError, SendResult } from "../types";
-import { verifyClientHealth, safeDestroyClient, Session } from "../session";
 import { validateWhatsAppNumber } from "./number-utils";
 import { errMsg } from "../utils";
+import { Session } from "../session-v2/session";
+import { safeDestroyClient } from "../session-v2/service";
 
 function makeAppError(message: string, statusCode: number, shouldRetry: boolean): AppError {
     const err = new Error(message) as AppError;
@@ -27,7 +28,7 @@ export async function sendMessage(
     }
 
     if (!session.ready) {
-        throw makeAppError(
+        throw AppError(
             `Empresa ${companySlug} não está conectada ao WhatsApp. Acesse /status/${companySlug} para reconectar.`,
             422,
             false,

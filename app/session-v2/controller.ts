@@ -110,3 +110,24 @@ export const listSessionsController = async (req: Request, res: Response) => {
     return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
   }
 };
+
+export const sendMessage = async (req: Request, res: Response) => {
+  const { company } = req.params as { company: string };
+  const { number, message } = req.body as { number: string; message: string };
+
+    try {
+        const session = getSession(company);
+    if (!session?.ready) {
+      return returnError(422, res, `Empresa ${company} não está conectada ao WhatsApp. Acesse POST /session/${company} para reconectar.`);
+    }
+    const messageSent = await session.sendMessage(number, message);
+
+    if (!messageSent) {
+      throw Error(`Falha ao enviar mensagem para ${number} usando a sessão ${company}`);
+    }
+
+    return returnSuccess(res, { message: "Message sent successfully", messageSent });
+  } catch (error) {
+    return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
+  }
+};

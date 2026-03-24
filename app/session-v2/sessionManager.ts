@@ -1,6 +1,10 @@
 import path from "path";
 import fs from "fs";
 import { Session } from "./session";
+import { DISCONNECTED_STATES } from "./constants";
+import { info } from "console";
+import { HealthResult } from "../types";
+import { raceWithTimeout } from "../utils";
 
 class SessionManager {
     static instace;
@@ -75,6 +79,68 @@ class SessionManager {
                 return e.name.replace("session-", "");
             }
         });
+    }
+
+    async verifySessionHealth(companySlug: string) {
+        let response: HealthResult = { healthy: false, shouldReconnect: false };
+        if (!this.sessions[companySlug]?.client) {
+            response.reason = "Sessão não existe";
+        } else {
+            const session = this.sessions[companySlug];
+
+            try {
+                // Primeiro verifica se a página do puppeteer ainda está ativa
+                if (session.checkPupPage) {
+                    response.reason = "Página do browser fechada";
+                }
+                // Tenta obter o estado do cliente
+                const state = await session.getState();
+
+                // Se o estado é CONNECTED, está saudável
+                if (state === 'CONNECTED') {
+                    console.log(`✅ Cliente ${companySlug} está CONNECTED`);
+                    response.healthy = true;
+                    response.state = state;
+                } else if (DISCONNECTED_STATES.includes(state)) {
+                    // Se o estado é explicitamente desconectado, não está saudável
+                    console.log(`❌ Cliente ${companySlug} está em estado de desconexão: ${state}`);
+                    response.reason = `Estado de desconexão: ${state}`;
+                    response.shouldReconnect = true;
+                }
+
+                // Para outros estados (null, undefined, OPENING, PAIRING, etc.),
+                // tenta uma verificação prática: obter info do cliente
+                session.logger.log(`🔍 Estado ambíguo (${state}), tentando verificação prática...`);
+                const infoSerialized = await session.getInfo();
+
+                if (infoSerialized) {
+                    session.logger.log(`✅ Cliente ${session.name} tem info válida: ${infoSerialized}`);
+                    response.healthy = true;
+                    response.state = state || 'ASSUMED_CONNECTED';
+                    response.info = infoSerialized;
+                }
+
+
+                // Última tentativa: verificar se consegue listar chats (operação leve)
+                const chatsLength = await session.getChatsLength();
+                if (typeof chatsLength === 'number') {
+                    session.logger.log(`✅ Foi possível listar ${chatsLength} chats - está funcional`);
+                    response.healthy = true;
+                    response.state = state || 'FUNCTIONAL';
+                    response.info = `${chatsLength} chats`;
+                }
+
+                // Se chegou aqui, não está saudável
+                session.logger.log(`❌ Falha em todas as verificações de saúde`);
+                response.reason = `Estado: ${state || 'desconhecido'} - falhou nas verificações práticas`;
+                response.shouldReconnect = true;
+            } catch (error) {
+                session.logger.log(`❌ Falha na verificação de saúde: ${error.message}`);
+                response.reason = `Erro na verificação: ${error.message}`;
+                response.shouldReconnect = true;
+            }
+        }
+        return response;
     }
 }
 

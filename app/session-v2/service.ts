@@ -3,20 +3,11 @@ import { raceWithTimeout } from "../utils";
 import { execSync } from "child_process";
 import { Logger, server } from "../logging";
 import { sessionManager } from "./sessionManager";
-
-export const RECONNECT_CONFIG = {
-    initialDelayMs: 5000, // 5 segundos
-    maxDelayMs: 20000, // 20 segundos
-    maxAttempts: 3, // 3 tentativas (5s, 10s, 20s)
-    backoffMultiplier: 2,
-};
-
-export const PERMANENT_FAILURE_REASONS = [
-    "LOGOUT",
-    "TOS_BLOCK",
-    "SMB_TOS_BLOCK",
-    "DEPRECATED_VERSION",
-];
+import { CONNECTION_ERRORS, KNOWN_LIBRARY_BUGS, RECONNECT_CONFIG, TIMEOUT_ERRORS } from "./constants";
+import { validateWhatsAppNumber } from "../wppwebjs";
+import { MessageData } from "../types";
+import path from "path";
+import fs from "fs";
 
 export function getSession(name: string): Session | null {
     server.log(`Obtendo sessão para empresa: ${name}`);
@@ -218,4 +209,97 @@ export async function listSessions(){
 
 export async function clearAllSessions(){
     return sessionManager.clearAllSessions();
+};
+
+export const sendMenssageService = async (session: Session, number: string, message: string) => {
+    server.log(`📤 Iniciando envio para ${session.name} (ready=${session.ready})`);
+
+    try {
+        const messageData: MessageData = await session.sendMessage(number, message);
+
+        return {
+            success: true,
+            message: "Mensagem enviada com sucesso",
+            data: messageData,
+        };
+    } catch (error: any) {
+        session.logger.log(`❌ Erro ao enviar mensagem pelo cliente ${session.name}: ${error.message}`);
+
+        if (error.status === 400 || error.message.includes("não é um usuário válido")) {
+            throw error;
+        }
+
+        const isKnownLibraryBug = KNOWN_LIBRARY_BUGS.some((bug) => error.message.includes(bug));
+        const isTimeoutError = TIMEOUT_ERRORS.some((t) =>
+            error.message.toLowerCase().includes(t.toLowerCase()),
+        );
+        const isConnectionError = CONNECTION_ERRORS.some((c) => error.message.includes(c));
+        let verifyHealth = false;
+        let shouldRetry = false;
+
+
+        switch (true) {
+            case isKnownLibraryBug:
+                session.logger.log(`⚠️ Erro conhecido da biblioteca detectado: ${error.message}`);
+                verifyHealth = true;
+                break;
+            case isTimeoutError:
+                session.logger.log(`⏱️ Erro de timeout detectado: ${error.message}`);
+                verifyHealth = true;
+                break;
+            case isConnectionError:
+                session.logger.log(`🔌 Erro de conexão detectado: ${error.message}`);
+                break;
+            default:
+                session.logger.log(`⚠️ Erro desconhecido ao enviar mensagem: ${error.message}`);
+                break;
+        }
+
+        if (verifyHealth) {
+            const healthCheck = await sessionManager.verifySessionHealth(session.name);
+            if (healthCheck.healthy) {
+                session.logger.log(`🔄 Conexão saudável. Tentando enviar novamente em 1 segundo...`);
+                await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+                shouldRetry = true;
+            }
+        } 
+        
+        if (shouldRetry) {
+            const retryData: MessageData = await session.sendMessage(number, message);
+            return {
+                success: true,
+                message: "Mensagem enviada com sucesso após retry",
+                data: retryData,
+            };
+
+        }
+        destroy(session);
+    }
+};
+
+
+
+const destroy = async (session: Session) => {
+    session.logger.log(
+        `❌ Envio e retry falharam. Destruindo sessão e limpando auth para forçar novo QR Code...`,
+    );
+
+    await safeDestroyClient(session);
+
+    try {
+        const authDir = path.resolve(
+            __dirname,
+            "..",
+            ".wwebjs_auth",
+            `session-${session.name}`,
+        );
+        await fs.promises.rm(authDir, { recursive: true, force: true });
+        session.logger.log(`🗑️ Auth data removido: ${authDir}`);
+    } catch (cleanErr) {
+        session.logger.log(`⚠️ Erro ao limpar auth data de ${session.name}: ${cleanErr.message}`);
+    }
+
+    throw new Error(
+        `Falha ao enviar mensagem. Sessão ${session.name} foi encerrada. Acesse /status/${session.name} para escanear novo QR Code.`,
+    );
 };

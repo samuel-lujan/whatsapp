@@ -1,8 +1,9 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface AppError extends Error {
-    shouldRetry?: boolean;
-    statusCode?: number;
+export interface ContactInfo {
+    pushname: string;
+    chatName: string;
+    isMyContact?: boolean;
 }
 
 export interface ConnectionStatus {
@@ -60,10 +61,7 @@ export interface ChatIdResult {
     error?: string;
 }
 
-export interface SendResult {
-    success: boolean;
-    message: string;
-    data: {
+export interface MessageData {
         companySlug: string;
         number: string;
         originalNumber: string;
@@ -71,10 +69,17 @@ export interface SendResult {
         wasAlternative?: boolean;
         chatName?: string;
         userPushname?: string;
-        content: string;
-        timestamp: string;
+        content?: string;
+        timestamp?: string;
         wasRetry?: boolean;
+        isMyContact?: boolean;
+        chatId?: string;
     };
+
+export interface SendResult {
+    success: boolean;
+    message: string;
+    data: MessageData;
 }
 
 export interface ClearResult {

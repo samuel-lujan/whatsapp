@@ -3,12 +3,10 @@ dotenv.config();
 
 import express from "express";
 import Rollbar from "rollbar";
-import { execSync } from "child_process";
 import { createRouterV2 } from "./routes";
-import { raceWithTimeout } from "./utils";
 import { errorHandler } from "./session-v2/errorHandler";
-import { clearAllSessions } from "./session-v2/service";
 import { server } from "./logging";
+import { gracefulShutdown } from "./utils";
 
 const rollbar = new Rollbar({
     accessToken: process.env.ROLLBAR_ACCESS_TOKEN,
@@ -37,36 +35,11 @@ app.listen(PORT, () => {
 
 // Graceful shutdown - limpa todas as sessoes/Chrome antes de sair
 let isShuttingDown = false;
-async function gracefulShutdown(signal: string): Promise<void> {
-    const tag = "SHUTDOWN";
-    if (isShuttingDown) return;
-    isShuttingDown = true;
-
-    server.jumpLineLog(`Recebido ${signal}, limpando todas as sessoes...`, tag);
-
-    try {
-        await raceWithTimeout(clearAllSessions(), 30000, "shutdown timeout");
-        server.log(`Sessoes limpas com sucesso`, tag);
-    } catch (err: any) {
-        server.log(`Erro/timeout na limpeza: ${err.message}`, tag);
-    }
-
-    // Ultimo recurso: mata processos Chrome orfaos
-    try {
-        execSync('pkill -f "chromium.*--no-sandbox" || true', { timeout: 5000 });
-    } catch (e) {
-        // pkill retorna non-zero se nenhum processo encontrado
-    }
-
-    server.log(`Saindo.`, tag);
-    process.exit(0);
-}
-
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT", isShuttingDown));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM", isShuttingDown));
 
 process.on("uncaughtException", (err) => {
     server.log(`Excecao nao capturada: ${err.message}`, "FATAL");
     rollbar.error(err);
-    gracefulShutdown("uncaughtException");
+    gracefulShutdown("uncaughtException", isShuttingDown);
 });

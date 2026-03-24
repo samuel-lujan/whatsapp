@@ -1,8 +1,11 @@
-import { Client, LocalAuth, Message } from "whatsapp-web.js";
+import { Client, ClientInfo, LocalAuth, Message, WAState } from "whatsapp-web.js";
 import { Logger } from "../logging";
 import { getAiResponse } from "../langchain/langchain";
 import { raceWithTimeout, errMsg } from "../utils";
-import { PERMANENT_FAILURE_REASONS, scheduleReconnect, safeDestroyClient } from "./service";
+import { scheduleReconnect, safeDestroyClient } from "./service";
+import { validateWhatsAppNumber } from "../wppwebjs";
+import { ContactInfo, MessageData } from "../types";
+import { PERMANENT_FAILURE_REASONS } from "./constants";
 
 export class Session {
     client: Client;
@@ -233,4 +236,108 @@ export class Session {
             }
         };
     }
+
+    sendMessage = async (number: string, message: string): Promise<MessageData> => {
+        this.logger.log(`🔍 Validando número ${number}...`);
+        const validation = await validateWhatsAppNumber(this.client, number);
+
+        if (!validation.isValid) {
+            this.logger.log(`❌ Número ${number} não é válido no WhatsApp`);
+            throw new Error(`Número ${number} não é um usuário válido do WhatsApp`);
+        }
+
+        let messageData: MessageData = {
+            companySlug: this.name,
+            number: validation.originalNumber,
+            originalNumber: validation.validatedNumber,
+            wasAlternative: validation.wasAlternative,
+            chatId: validation.numberId!,
+            content: message,
+            timestamp: new Date().toISOString(),
+        }
+
+        const validationInfo = validation.wasFallback
+            ? " (fallback - não confirmado pela API)"
+            : validation.wasAlternative
+                ? " (versão alternativa)"
+                : "";
+        this.logger.log(`✅ Número validado: ${messageData.chatId}${validationInfo}`);
+
+        this.logger.log(`📤 Enviando mensagem do cliente ${this.name} para ${messageData.chatId}`);
+        await this.client.sendMessage(messageData.chatId, message);
+        this.logger.log(`✅ Mensagem enviada com sucesso!`);
+        
+        let contactInfo: ContactInfo = {
+            pushname: "Desconhecido",
+            chatName: messageData.chatId,
+        };
+
+        try {
+            const chat = await this.client.getChatById(messageData.chatId!);
+            const contact = await chat.getContact();
+            contactInfo = {
+                pushname: contact.pushname || "Sem nome",
+                chatName: chat.name || messageData.chatId,
+                isMyContact: contact.isMyContact,
+            };
+            this.logger.log(`👤 Informações do contato: ${contactInfo.pushname}`);
+        } catch (e) {
+            this.logger.log(`⚠️ Não foi possível obter informações do contato: ${e.message}`);
+        }
+
+        return messageData;
+    }
+
+    checkPupPage = async (): Promise<boolean> => {
+        if (this.client.pupPage) {
+            try {
+                const isClosed = this.client.pupPage.isClosed();
+                if (isClosed) {
+                    this.logger.log(`❌ Cliente ${this.name} - página do browser está fechada`);
+                    return false;
+                }
+            } catch (e) {
+                this.logger.log(`⚠️ Erro ao verificar página do browser para ${this.name}: ${e.message}`);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    getState = async (): Promise<WAState> => {
+        try {
+            const state = await raceWithTimeout(this.client.getState(), 5000, "getState timeout");
+            this.logger.log(`📊 Estado do cliente: ${state}`);
+            return state;
+        } catch (e) {
+            this.logger.log(`⚠️ Timeout ao obter estado do cliente, tentando verificação alternativa...`);
+            return null;
+        }
+    }
+
+    getInfo = async (): Promise<string> => {
+        try {
+            // Tenta obter informações básicas do cliente - isso só funciona se conectado
+            const info = await raceWithTimeout(Promise.resolve(this.client.info), 3000, 'timeout-info')
+            return info?.wid._serialized || null;
+            } catch (e) {
+                this.logger.log(`⚠️ Não foi possível obter info do cliente: ${e.message}`);
+                return null;
+            }
+        }
+    
+    getChatsLength = async (): Promise<number> => {
+                        try {
+                this.logger.log(`🔍 Tentativa final: listando chats...`);
+                const chats = await raceWithTimeout(this.client.getChats(), 5000, 'timeout-chats');
+
+                if (chats && Array.isArray(chats)) {
+                    this.logger.log(`✅ Foi possível listar ${chats.length} chats - está funcional`);
+                    return chats.length;
+                }
+                } catch (e) {
+                    this.logger.log(`❌ Não foi possível listar chats: ${e.message}`);
+                    return null;
+                }
+            }
 }
