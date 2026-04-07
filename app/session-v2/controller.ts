@@ -1,23 +1,8 @@
 import { Request, Response } from "express";
-import { createSession, deleteSession, getSession, listSessions, loadAllSessions } from "./service";
+import { createSession, deleteSession, getSession, listSessions, loadAllSessions, sendMessageService } from "./service";
 import qrcodeTerminal from "qrcode-terminal";
 import { server } from "../logging";
-
-function returnSuccess(res: Response, data: unknown, args: Record<string, unknown> = {}) {
-  return res.status(200).json({
-    success: true,
-    data,
-    ...args,
-  });
-}
-
-function returnError(status: number, res: Response, message: string, args: Record<string, unknown> = {}) {
-  return res.status(status).json({
-    success: false,
-    message,
-    ...args,
-  });
-}
+import { returnError, returnSuccess } from "../utils";
 
 export const getSessionController = (req: Request, res: Response) => {
   const { company } = req.params as { company: string };
@@ -37,6 +22,7 @@ export const createSessionController = async (req: Request, res: Response, hasAi
   const { company } = req.params as { company: string };
   try {
     const alreadyExists = getSession(company);
+    server.log(alreadyExists ? `✅ Sessão já existe para empresa ${company}` : `🔍 Nenhuma sessão existente para empresa ${company}`);
     if (alreadyExists) {
       return returnError(400, res, `Session with name ${company} already exists`);
     }
@@ -111,16 +97,16 @@ export const listSessionsController = async (req: Request, res: Response) => {
   }
 };
 
-export const sendMessage = async (req: Request, res: Response) => {
+export const sendMessageController = async (req: Request, res: Response) => {
   const { company } = req.params as { company: string };
-  const { number, message } = req.body as { number: string; message: string };
+  const { number, message, customName } = req.body as { number: string; message: string; customName?: string };
 
     try {
         const session = getSession(company);
     if (!session?.ready) {
       return returnError(422, res, `Empresa ${company} não está conectada ao WhatsApp. Acesse POST /session/${company} para reconectar.`);
     }
-    const messageSent = await session.sendMessage(number, message);
+    const messageSent = await sendMessageService(session, number, message, customName);
 
     if (!messageSent) {
       throw Error(`Falha ao enviar mensagem para ${number} usando a sessão ${company}`);

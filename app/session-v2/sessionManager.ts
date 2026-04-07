@@ -5,10 +5,12 @@ import { DISCONNECTED_STATES } from "./constants";
 import { info } from "console";
 import { HealthResult } from "../types";
 import { raceWithTimeout } from "../utils";
+import { server } from "../logging";
 
 class SessionManager {
     static instace;
     private sessions: Record<string, Session> = {};
+    private pendingSessions: Record<string, Promise<Session>> = {};
 
     constructor() {
         if (SessionManager.instace) {
@@ -20,35 +22,80 @@ class SessionManager {
     async setup() {
         console.log(`SessionManager initialized`);
         const activeSessions = await this.listClientFolders();
+        server.log(`Sessões ativas encontradas: ${activeSessions.length > 0 ? activeSessions.join(", ") : "Nenhuma"}`);
         const isProduction = process.env.NODE_ENV === "production";
         const isHeadless = isProduction || process.env.HEADLESS === "true";
-        for (const name of activeSessions) {
-            return this.loadSession(name);
-        }
+
+        await Promise.all(
+            activeSessions
+                .filter((name): name is string => Boolean(name))
+                .map((name) => this.loadSession(name, isHeadless)),
+        );
     }
 
-    async loadSession(name: string): Promise<Session | null> {
-        console.log(`Restaurando sessão ${name}`);
-        const session = new Session(name, false, false);
+    async loadSession(name: string, isHeadless: boolean = false): Promise<void> {
+        if (this.sessions[name]) {
+            server.log(`Sessão ${name} já está carregada, ignorando restauração duplicada`);
+            return;
+        }
+
+        server.log(`Restaurando sessão ${name}`);
+        const session = new Session(name, isHeadless, false);
         this.sessions[name] = session;
-        await session.initialize()
-        return session;
+        server.log(`Sessões atuais: ${Object.keys(this.sessions)}`);
+
+        try {
+            await session.initialize();
+            session.ready = true;
+            session.logger.log(`Sessão ${name} restaurada e pronta para uso`);
+        } catch (error) {
+            delete this.sessions[name];
+            throw error;
+        }
     };
 
     getSession(name: string): Session | null {
         const session = this.sessions[name];
         if (!session) {
-            console.error(`Error fetching metadata for missing session ${name}`);
+            server.log(`Error fetching metadata for missing session ${name} - ${Object.keys(this.sessions)}`);
             return null;
         }
         return session;
     }
 
     async createSession(name: string, isHeadless: boolean, hasAi: boolean): Promise<Session> {
-        const session = new Session(name, isHeadless, hasAi);
-        this.sessions[name] = session;
-        await session.initialize();
-        return session;
+        const existingSession = this.sessions[name];
+        if (existingSession) {
+            existingSession.logger.log(`Sessão já existe em memória, reutilizando instância`, "CREATE");
+            return existingSession;
+        }
+
+        const pendingSession = this.pendingSessions[name];
+        if (pendingSession) {
+            server.log(`Criação da sessão ${name} já está em andamento, aguardando a instância existente`);
+            return pendingSession;
+        }
+
+        const createPromise = (async () => {
+            const session = new Session(name, isHeadless, hasAi);
+            this.sessions[name] = session;
+
+            try {
+                await session.initialize();
+                return session;
+            } catch (error) {
+                delete this.sessions[name];
+                throw error;
+            }
+        })();
+
+        this.pendingSessions[name] = createPromise;
+
+        try {
+            return await createPromise;
+        } finally {
+            delete this.pendingSessions[name];
+        }
     }
 
     async removeSession(name: string): Promise<void> {

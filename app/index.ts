@@ -1,12 +1,14 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+import http from "node:http";
 import express from "express";
 import Rollbar from "rollbar";
 import { createRouterV2 } from "./routes";
 import { errorHandler } from "./session-v2/errorHandler";
 import { server } from "./logging";
 import { gracefulShutdown } from "./utils";
+import { initSocketServer } from "./socket";
 
 const rollbar = new Rollbar({
     accessToken: process.env.ROLLBAR_ACCESS_TOKEN,
@@ -28,7 +30,10 @@ app.use(express.json());
 app.use(createRouterV2(rollbar));
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+const httpServer = http.createServer(app);
+initSocketServer(httpServer);
+
+httpServer.listen(PORT, () => {
     server.log(`Servidor multi-tenant WhatsApp rodando na porta ${PORT}`);
     server.jumpLineLog(`Pressione Ctrl+C para parar o servidor`);
 });

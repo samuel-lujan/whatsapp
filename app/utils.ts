@@ -1,6 +1,7 @@
 import { execSync } from "child_process";
 import { server } from "./logging";
 import { clearAllSessions } from "./session-v2/service";
+import { Response } from "express";
 
 export const errMsg = (e: unknown): string => (e as Error).message;
 
@@ -39,4 +40,21 @@ export async function gracefulShutdown(signal: string, isShuttingDown: boolean):
 
     server.log(`Saindo.`, tag);
     process.exit(0);
+}
+
+
+export function returnSuccess(res: Response, data: unknown, args: Record<string, unknown> = {}) {
+  return res.status(200).json({
+    success: true,
+    data,
+    ...args,
+  });
+}
+
+export function returnError(status: number, res: Response, message: string, args: Record<string, unknown> = {}) {
+  return res.status(status).json({
+    success: false,
+    message,
+    ...args,
+  });
 }

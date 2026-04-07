@@ -6,6 +6,7 @@ import { scheduleReconnect, safeDestroyClient } from "./service";
 import { validateWhatsAppNumber } from "../wppwebjs";
 import { ContactInfo, MessageData } from "../types";
 import { PERMANENT_FAILURE_REASONS } from "./constants";
+import { io } from "../socket";
 
 export class Session {
     client: Client;
@@ -21,6 +22,7 @@ export class Session {
     lastBatteryUpdate?: number;
     logger: Logger;
     hasAi: boolean = false;
+    trackingContacts: ContactInfo[] = [];
 
     constructor(name: string, isHeadless: boolean, hasAi: boolean) {
         this.name = name;
@@ -62,6 +64,10 @@ export class Session {
         client.on("change_state", this.onChangeState());
         client.on("error", this.onError());
         client.on("change_battery", this.onChangeBattery());
+        client.on("message", (message) => {
+            this.logger.log(`📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`, "onMESSAGE");
+            io?.to(this.name).emit("newMessage", message);
+        });
         if (this.hasAi) {
             client.on("message", this.onMessage(client));
         }
@@ -237,9 +243,17 @@ export class Session {
         };
     }
 
-    sendMessage = async (number: string, message: string): Promise<MessageData> => {
+    sendMessage = async (number: string, message: string, customName?: string): Promise<MessageData> => {
+        if (!this.ready) {
+            throw new Error(`Sessão ${this.name} não está pronta para enviar mensagens`);
+        }
+        const pageOk = await this.checkPupPage();
+        if (!pageOk) {
+            throw new Error(`Sessão ${this.name} - browser desconectado, não é possível enviar mensagem`);
+        }
+
         this.logger.log(`🔍 Validando número ${number}...`);
-        const validation = await validateWhatsAppNumber(this.client, number);
+        const validation = await validateWhatsAppNumber(this.client, number, this.logger);
 
         if (!validation.isValid) {
             this.logger.log(`❌ Número ${number} não é válido no WhatsApp`);
@@ -266,10 +280,11 @@ export class Session {
         this.logger.log(`📤 Enviando mensagem do cliente ${this.name} para ${messageData.chatId}`);
         await this.client.sendMessage(messageData.chatId, message);
         this.logger.log(`✅ Mensagem enviada com sucesso!`);
-        
+
         let contactInfo: ContactInfo = {
             pushname: "Desconhecido",
             chatName: messageData.chatId,
+            number: messageData.chatId,
         };
 
         try {
@@ -278,11 +293,19 @@ export class Session {
             contactInfo = {
                 pushname: contact.pushname || "Sem nome",
                 chatName: chat.name || messageData.chatId,
+                number: messageData.chatId,
                 isMyContact: contact.isMyContact,
             };
             this.logger.log(`👤 Informações do contato: ${contactInfo.pushname}`);
         } catch (e) {
             this.logger.log(`⚠️ Não foi possível obter informações do contato: ${e.message}`);
+        }
+
+        const existingIndex = this.trackingContacts.findIndex(c => c.number === messageData.chatId);
+        if (existingIndex === -1) {
+            this.trackingContacts.push({ ...contactInfo, ...(customName ? { customName } : {}) });
+        } else if (customName) {
+            this.trackingContacts[existingIndex].customName = customName;
         }
 
         return messageData;

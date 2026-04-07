@@ -4,7 +4,6 @@ import { execSync } from "child_process";
 import { Logger, server } from "../logging";
 import { sessionManager } from "./sessionManager";
 import { CONNECTION_ERRORS, KNOWN_LIBRARY_BUGS, RECONNECT_CONFIG, TIMEOUT_ERRORS } from "./constants";
-import { validateWhatsAppNumber } from "../wppwebjs";
 import { MessageData } from "../types";
 import path from "path";
 import fs from "fs";
@@ -111,45 +110,54 @@ export async function safeDestroyClient(session: Session): Promise<void> {
 
 export async function scheduleReconnect(session: Session, reason: string): Promise<void> {
     const tag = "RECONNECT";
-    if (session) {
-        const attempt = session.reconnectAttempts || 0;
+    if (!session) {
+        return;
+    }
 
-        if (attempt >= RECONNECT_CONFIG.maxAttempts) {
-            session.logger.log(`max tentativas (${RECONNECT_CONFIG.maxAttempts}) atingido, desistindo`);
+    if (session.reconnectTimer) {
+        session.logger.log(`reconnect já agendado, ignorando novo gatilho (${reason})`, tag);
+        return;
+    }
+
+    const attempt = session.reconnectAttempts || 0;
+
+    if (attempt >= RECONNECT_CONFIG.maxAttempts) {
+        session.logger.log(`max tentativas (${RECONNECT_CONFIG.maxAttempts}) atingido, desistindo`, tag);
+        await safeDestroyClient(session);
+        return;
+    }
+
+    const attempt_delay =
+        RECONNECT_CONFIG.initialDelayMs * Math.pow(RECONNECT_CONFIG.backoffMultiplier, attempt);
+    const delay = Math.min(attempt_delay, RECONNECT_CONFIG.maxDelayMs);
+    session.logger.log(`tentativa ${attempt + 1}/${RECONNECT_CONFIG.maxAttempts} em ${delay / 1000}s (motivo: ${reason})`, tag);
+    session.reconnectAttempts = attempt;
+
+    session.reconnectTimer = setTimeout(async () => {
+        session.reconnectTimer = null;
+
+        try {
             await safeDestroyClient(session);
-            return;
+
+            session.logger.log(`criando sessao nova...`, tag);
+            await createSession(session.name, session.hasAi);
+
+            await new Promise<void>((resolve) => setTimeout(resolve, 15000));
+
+            const reconnectedSession = sessionManager.getSession(session.name);
+            if (reconnectedSession?.ready) {
+                reconnectedSession.reconnectAttempts = 0;
+                session.reconnectAttempts = 0;
+                session.logger.log(`reconectou com sucesso!`, tag);
+                return;
+            }
+        } catch (err) {
+            session.logger.log(`falha na tentativa de reconnect: ${err instanceof Error ? err.message : String(err)}`, tag);
         }
 
-        const attempt_delay =
-            RECONNECT_CONFIG.initialDelayMs * Math.pow(RECONNECT_CONFIG.backoffMultiplier, attempt);
-        const delay = Math.min(attempt_delay, RECONNECT_CONFIG.maxDelayMs);
-        session.logger.log(`tentativa ${attempt + 1}/${RECONNECT_CONFIG.maxAttempts} em ${delay / 1000}s (motivo: ${reason})`);
-        session.reconnectAttempts = attempt;
-
-        session.reconnectTimer = setTimeout(async () => {
-            try {
-                await safeDestroyClient(session);
-
-                session.logger.log(`criando sessao nova...`);
-                await createSession(session.name);
-
-                await new Promise<void>((resolve) => setTimeout(resolve, 15000));
-
-                if (sessionManager.getSession(session.name)?.ready) {
-                    session.logger.log(`reconectou com sucesso!`);
-                    sessionManager.getSession(session.name)!.reconnectAttempts = 0;
-                    return;
-                }
-            } catch (err) {
-                throw err;
-            }
-            if (sessionManager.getSession(session.name)) {
-                sessionManager.getSession(session.name)!.reconnectAttempts = attempt + 1;
-                session.reconnectAttempts = attempt + 1;
-                await scheduleReconnect(session, reason);
-            }
-        }, delay);
-    }
+        session.reconnectAttempts = attempt + 1;
+        await scheduleReconnect(session, reason);
+    }, delay);
 }
 
 export async function createSession(name: string, hasAi: boolean = false): Promise<Session> {
@@ -211,11 +219,11 @@ export async function clearAllSessions(){
     return sessionManager.clearAllSessions();
 };
 
-export const sendMenssageService = async (session: Session, number: string, message: string) => {
+export const sendMessageService = async (session: Session, number: string, message: string, customName?: string) => {
     server.log(`📤 Iniciando envio para ${session.name} (ready=${session.ready})`);
 
     try {
-        const messageData: MessageData = await session.sendMessage(number, message);
+        const messageData: MessageData = await session.sendMessage(number, message, customName);
 
         return {
             success: true,
@@ -251,6 +259,7 @@ export const sendMenssageService = async (session: Session, number: string, mess
                 session.logger.log(`🔌 Erro de conexão detectado: ${error.message}`);
                 break;
             default:
+                verifyHealth = true;
                 session.logger.log(`⚠️ Erro desconhecido ao enviar mensagem: ${error.message}`);
                 break;
         }
@@ -265,19 +274,27 @@ export const sendMenssageService = async (session: Session, number: string, mess
         } 
         
         if (shouldRetry) {
-            const retryData: MessageData = await session.sendMessage(number, message);
-            return {
-                success: true,
-                message: "Mensagem enviada com sucesso após retry",
-                data: retryData,
-            };
+            try {
+                const retryData: MessageData = await session.sendMessage(number, message);
+                return {
+                    success: true,
+                    message: "Mensagem enviada com sucesso após retry",
+                    data: retryData,
+                };
+            } catch (retryError: any) {
+                session.logger.log(`❌ Erro ao enviar mensagem após retry pelo cliente ${session.name}: ${retryError.message}`);
+                return {
+                    success: false,
+                    message: "Falha ao enviar mensagem após retry",
+                    data: null,
+                };
+            }
+
 
         }
         destroy(session);
     }
 };
-
-
 
 const destroy = async (session: Session) => {
     session.logger.log(

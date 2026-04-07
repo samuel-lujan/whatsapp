@@ -3,6 +3,8 @@
 export interface ContactInfo {
     pushname: string;
     chatName: string;
+    number: string;
+    customName?: string;
     isMyContact?: boolean;
 }
 
