@@ -34,9 +34,16 @@ class SessionManager {
     }
 
     async loadSession(name: string, isHeadless: boolean = false): Promise<void> {
-        if (this.sessions[name]) {
-            server.log(`Sessão ${name} já está carregada, ignorando restauração duplicada`);
-            return;
+        const existingSession = this.sessions[name];
+        if (existingSession) {
+            const isPuppeteerOpen = await existingSession.checkPupPage();
+
+            if (existingSession.ready && isPuppeteerOpen) {
+                server.log(`Sessão ${name} já está carregada com o Puppeteer ativo, ignorando restauração duplicada`);
+                return;
+            }
+
+            existingSession.logger.log(`⚠️ Sessão em memória, mas com Puppeteer fechado. Recriando...`, "LOAD");
         }
 
         server.log(`Restaurando sessão ${name}`);
@@ -49,7 +56,6 @@ class SessionManager {
             session.ready = true;
             session.logger.log(`Sessão ${name} restaurada e pronta para uso`);
         } catch (error) {
-            delete this.sessions[name];
             throw error;
         }
     };
@@ -137,9 +143,13 @@ class SessionManager {
 
             try {
                 // Primeiro verifica se a página do puppeteer ainda está ativa
-                if (session.checkPupPage) {
+                const isPuppeteerOpen = await session.checkPupPage();
+                if (!isPuppeteerOpen) {
                     response.reason = "Página do browser fechada";
+                    response.shouldReconnect = true;
+                    return response;
                 }
+
                 // Tenta obter o estado do cliente
                 const state = await session.getState();
 

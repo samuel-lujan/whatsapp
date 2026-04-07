@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { createSession, deleteSession, getSession, listSessions, loadAllSessions, sendMessageService } from "./service";
+import { createSession, deleteSession, getSession, listSessions, loadAllSessions, loadSession, sendMessageService } from "./service";
 import qrcodeTerminal from "qrcode-terminal";
 import { server } from "../logging";
 import { returnError, returnSuccess } from "../utils";
@@ -24,7 +24,8 @@ export const createSessionController = async (req: Request, res: Response, hasAi
     const alreadyExists = getSession(company);
     server.log(alreadyExists ? `✅ Sessão já existe para empresa ${company}` : `🔍 Nenhuma sessão existente para empresa ${company}`);
     if (alreadyExists) {
-      return returnError(400, res, `Session with name ${company} already exists`);
+      await loadSession(company);
+      return returnSuccess(res, alreadyExists, { message: `Sessão ${company} já estava ativa, retornando sessão existente` });
     }
 
     const session = await createSession(company, hasAi);

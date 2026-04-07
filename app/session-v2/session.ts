@@ -64,10 +64,10 @@ export class Session {
         client.on("change_state", this.onChangeState());
         client.on("error", this.onError());
         client.on("change_battery", this.onChangeBattery());
-        client.on("message", (message) => {
-            this.logger.log(`📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`, "onMESSAGE");
-            io?.to(this.name).emit("newMessage", message);
-        });
+        // client.on("message", (message) => {
+        //     this.logger.log(`📩 Mensagem recebida de ${message.from}: "${message.body?.substring(0, 50)}..."`, "onMESSAGE");
+        //     io?.to(this.name).emit("newMessage", message);
+        // });
         if (this.hasAi) {
             client.on("message", this.onMessage(client));
         }
@@ -214,10 +214,10 @@ export class Session {
                     return;
                 }
 
-                const shouldRespond = message.from.endsWith("@g.us");
+                const shouldRespond = message.from.endsWith("@c.us");
 
                 if (shouldRespond) {
-                    const aiResponse = await getAiResponse(message, this.name);
+                    const aiResponse = await getAiResponse(message, this.name, this.logger);
 
                     if (aiResponse.success) {
                         await raceWithTimeout(
@@ -230,16 +230,41 @@ export class Session {
                     }
                 }
 
-                const chat = await message.getChat();
-                if (typeof chat.markUnread === "function") {
-                    await chat.markUnread();
-                    this.logger.log(`ℹ️ Mensagem marcada como não lida para atendimento humano - ${this.name}`, tag);
-                } else {
-                    this.logger.log(`ℹ️ Sem resposta da IA para ${this.name}, método markUnread não disponível nesta versão`, tag);
-                }
+              this.logger.log(`ℹ️ Mensagem IA indisponível, ignorando.`, tag);
             } catch (error) {
                 this.logger.log(`❌ Erro ao processar mensagem: ${errMsg(error)}`, tag);
             }
+        };
+    }
+
+    toJSON() {
+        let isPuppeteerOpen = false;
+
+        try {
+            isPuppeteerOpen = !!this.client?.pupPage && !this.client.pupPage.isClosed();
+        } catch {
+            isPuppeteerOpen = false;
+        }
+
+        return {
+            name: this.name,
+            qrCode: this.qrCode,
+            ready: this.ready,
+            connecting: this.connecting,
+            destroying: this.destroying,
+            reconnectAttempts: this.reconnectAttempts,
+            lastDisconnectTime: this.lastDisconnectTime,
+            lastDisconnectReason: this.lastDisconnectReason,
+            lastBatteryUpdate: this.lastBatteryUpdate ?? null,
+            hasAi: this.hasAi,
+            trackingContacts: this.trackingContacts,
+            isPuppeteerOpen,
+            clientInfo: this.client?.info
+                ? {
+                    wid: this.client.info.wid._serialized,
+                    pushname: this.client.info.pushname,
+                }
+                : null,
         };
     }
 

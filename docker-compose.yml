@@ -1,0 +1,54 @@
+services:
+  whatsapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-api
+    hostname: whatsapp-api
+
+    # Resource limits: 3 CPU cores and 8GB memory
+    deploy:
+      resources:
+        limits:
+          cpus: '3'
+          memory: 8gb
+        reservations:
+          cpus: '2.5'
+          memory: 6gb
+
+    # Port mappings
+    ports:
+      - "8080:8080"
+
+    # Volumes for session persistence
+    volumes:
+      - ./.wwebjs_auth:/usr/src/app/.wwebjs_auth
+      - ./.wwebjs_cache:/usr/src/app/.wwebjs_cache
+
+    # Environment variables
+    environment:
+      NODE_ENV: production
+      AUTH_TOKEN: ${AUTH_TOKEN:-sua-chave-secreta-aqui}
+      APP_TOKEN: ${APP_TOKEN:-seu-app-token}
+      BETA_HASH: ${BETA_HASH:-seu-beta-hash}
+      HEADLESS: "true"
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Network
+    networks:
+      - shared-network
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Network for service communication
+networks:
+  shared-network:
+    external: true
+    name: lang-network

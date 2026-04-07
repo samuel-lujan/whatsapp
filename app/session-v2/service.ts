@@ -206,6 +206,11 @@ export async function deleteSession(session: Session): Promise<{ success: boolea
     //   };
 };
 
+export async function loadSession(company: string){
+    await sessionManager.loadSession(company, process.env.HEADLESS === "true");
+    return sessionManager.listSessions();
+};
+
 export async function loadAllSessions(){
     await sessionManager.setup();
     return sessionManager.listSessions();
