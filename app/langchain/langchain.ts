@@ -80,13 +80,6 @@ async function getSession(
     msgTimestamp: number,
     logger: Logger
 ): Promise<ChatSession | null> {
-    // const receiver_hash = crypto.createHash("sha256").update(`${msgTo}`, "utf8").digest("hex");
-
-    // console.log("Receiver hash: ", receiver_hash);
-    // if (receiver_hash != BETA_HASH && receiver_hash != BETA_HASH_2) {
-    //     return null;
-    // }
-
     const tag = "AI_CHAT_SESSION"
 
     const sessionId = crypto
