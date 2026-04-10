@@ -110,7 +110,7 @@ export const sendMessageController = async (req: Request, res: Response) => {
     const messageSent = await sendMessageService(session, number, message, customName);
 
     if (!messageSent.success) {
-      throw Error(`Falha ao enviar mensagem para ${number} usando a sessão ${company}`);
+      throw Error(`Falha ao enviar mensagem para ${number} usando a sessão ${company}: ${messageSent.errorMessage}`);
     }
 
     return returnSuccess(res, { message: "Message sent successfully", messageSent });

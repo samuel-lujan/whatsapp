@@ -291,6 +291,7 @@ export const sendMessageService = async (session: Session, number: string, messa
                 return {
                     success: false,
                     message: "Falha ao enviar mensagem após retry",
+                    errorMessage: retryError instanceof Error ? retryError.message : String(retryError),
                     data: null,
                 };
             }
