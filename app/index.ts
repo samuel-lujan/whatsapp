@@ -22,7 +22,7 @@ const rollbar = new Rollbar({
     },
 });
 
-const PORT = 8080;
+const PORT = Number(process.env.PORT) || 8080;
 
 const app = express();
 

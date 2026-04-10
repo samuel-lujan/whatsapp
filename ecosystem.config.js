@@ -1,9 +1,14 @@
 module.exports = {
   apps: [
     {
-      name: 'whatsapp',
+      name: 'whatsapp-develop',
       script: 'bash',
-      args: '-c "nice -n 5 npm start"', // prioridade um pouco menor que o resto
+      args: '-c "nice -n 5 npm start"',
+
+      env: {
+        PORT: 8081,
+        NODE_ENV: 'production'
+      },
 
       instances: 1,
       exec_mode: 'fork',
@@ -11,18 +16,15 @@ module.exports = {
       autorestart: true,
       watch: false,
 
-      // 🧠 Agora podemos subir o limite
       max_memory_restart: '4G',
 
-      // 🔁 Controle de crash
       min_uptime: '120s',
       max_restarts: 10,
       restart_delay: 15000,
-      kill_timeout: 35000,       // 35s para graceful shutdown antes do SIGKILL
+      kill_timeout: 35000,
 
-      // 🧾 Logs
-      error_file: '/var/log/pm2-whatsapp-error.log',
-      out_file: '/var/log/pm2-whatsapp-out.log',
+      error_file: '/var/log/pm2-whatsapp-develop-error.log',
+      out_file: '/var/log/pm2-whatsapp-develop-out.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss'
     }
   ]
