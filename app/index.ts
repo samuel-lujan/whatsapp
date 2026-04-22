@@ -4,7 +4,7 @@ dotenv.config();
 import http from "node:http";
 import express from "express";
 import Rollbar from "rollbar";
-import { createRouterV2 } from "./routes";
+import { createRouterV2, createRouterV3 } from "./routes";
 import { errorHandler } from "./session-v2/errorHandler";
 import { server } from "./logging";
 import { gracefulShutdown } from "./utils";
@@ -28,6 +28,7 @@ const app = express();
 
 app.use(express.json());
 app.use(createRouterV2(rollbar));
+app.use(createRouterV3(rollbar));
 app.use(errorHandler);
 
 const httpServer = http.createServer(app);
