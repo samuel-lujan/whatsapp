@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from "express";
-import Rollbar from "rollbar";
 import { createSessionController, deleteSessionController, getSessionController, listSessionsController, loadAllSessionsController, sendMessageController } from "./session-v2/controller";
 import { createSessionController as createSessionControllerV3, deleteSessionController as deleteSessionControllerV3, getSessionController as getSessionControllerV3, listSessionsController as listSessionsControllerV3, loadAllSessionsController as loadAllSessionsControllerV3, sendMessageController as sendMessageControllerV3 } from "./session-v3/controller";
 import { server } from "./logging";
@@ -29,7 +28,7 @@ function authenticateToken(req: Request, res: Response, next: NextFunction): voi
     next();
 }
 
-export function createRouterV2(rollbar: Rollbar): Router {
+export function createRouterV2(): Router {
     const router = Router();
 
     router.get("/v2/session/:company", authenticateToken, getSessionController);

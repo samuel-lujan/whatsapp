@@ -46,6 +46,6 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM", isShuttingDown));
 
 process.on("uncaughtException", (err) => {
     server.log(`Excecao nao capturada: ${err.message}`, "FATAL");
-    rollbar.error(err);
+    server.error(err.message, "FATAL", "", err);
     gracefulShutdown("uncaughtException", isShuttingDown);
 });

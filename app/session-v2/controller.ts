@@ -74,8 +74,7 @@ export const deleteSessionController = async (req: Request, res: Response) => {
             return returnError(404, res, result.message, { company, timestamp });
         }
     } catch (error: any) {
-        server.log(`❌ Erro ao limpar sessão ${company}: ${error.message}`);
-        // rollbar.error(error, { company, route: "/clear/:companySlug" });
+        server.error(`❌ Erro ao limpar sessão ${company}: ${error.message}`, '', `/v2/session/${company}`, error);
         return returnError(500, res, error instanceof Error ? error.message : "Internal server error", { company, timestamp });
     }
 };
@@ -115,6 +114,7 @@ export const sendMessageController = async (req: Request, res: Response) => {
 
     return returnSuccess(res, { message: "Message sent successfully", messageSent });
   } catch (error) {
+    server.error(`❌ Erro ao enviar mensagem para ${company}: ${error instanceof Error ? error.message : "Internal server error"}`, '', `/v2/session/${company}/message`, error);
     return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
   }
 };
