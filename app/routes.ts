@@ -53,7 +53,7 @@ export function createRouterV2(): Router {
     return router;
 }
 
-export function createRouterV3(_rollbar: Rollbar): Router {
+export function createRouterV3(): Router {
     const router = Router();
 
     router.get("/v3/session/:company", authenticateToken, getSessionControllerV3);
