@@ -104,7 +104,7 @@ export class Session {
                         `Falha permanente (${statusCode}), destruindo sem reconnect`,
                         "onDISCONNECTED",
                     );
-                    await safeDestroyClient(this);
+                    await safeDestroyClient(this, true);
                 } else {
                     await scheduleReconnect(this, this.lastDisconnectReason);
                 }

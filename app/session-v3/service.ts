@@ -37,7 +37,7 @@ export async function waitForQrCode(session: Session, timeout = QR_TIMEOUT_MS): 
     });
 }
 
-export async function safeDestroyClient(session: Session): Promise<void> {
+export async function safeDestroyClient(session: Session, cleanAuth = false): Promise<void> {
     const tag = "DESTROY";
 
     if (!session?.sock) {
@@ -64,8 +64,44 @@ export async function safeDestroyClient(session: Session): Promise<void> {
         session.logger.log(`sock.end() falhou: ${e.message}`, tag);
     }
 
+    if (cleanAuth) {
+        const authDir = path.resolve(process.cwd(), BAILEYS_AUTH_DIR, `session-${session.name}`);
+        try {
+            await fs.promises.rm(authDir, { recursive: true, force: true });
+            session.logger.log(`Auth data removido: ${authDir}`, tag);
+        } catch (e: any) {
+            session.logger.log(`Erro ao remover auth data: ${e.message}`, tag);
+        }
+    }
+
     await sessionManager.removeSession(session.name);
     session.logger.log(`sessão removida da memória`, tag);
+}
+
+export async function deleteSessionByName(name: string): Promise<{ success: boolean; message: string; notFound: boolean }> {
+    const session = sessionManager.getSession(name);
+    if (session) {
+        const result = await deleteSession(session);
+        return { ...result, notFound: false };
+    }
+
+    const authDir = path.resolve(process.cwd(), BAILEYS_AUTH_DIR, `session-${name}`);
+    let dirExists = false;
+    try {
+        await fs.promises.access(authDir);
+        dirExists = true;
+    } catch {}
+
+    if (!dirExists) {
+        return { success: false, message: `Session with name ${name} not found`, notFound: true };
+    }
+
+    try {
+        await fs.promises.rm(authDir, { recursive: true, force: true });
+        return { success: true, message: `Sessão ${name} limpa (arquivos de auth removidos)`, notFound: false };
+    } catch (e: any) {
+        return { success: false, message: `Erro ao remover auth data: ${e.message}`, notFound: false };
+    }
 }
 
 export async function scheduleReconnect(session: Session, reason: string): Promise<void> {

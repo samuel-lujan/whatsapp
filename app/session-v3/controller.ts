@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import {
     createSession,
-    deleteSession,
+    deleteSessionByName,
     getSession,
     listSessions,
     loadAllSessions,
@@ -61,18 +61,15 @@ export const deleteSessionController = async (req: Request, res: Response) => {
     const { company } = req.params as { company: string };
     const timestamp = new Date().toISOString();
     try {
-        const session = getSession(company);
-        if (!session) {
-            return returnError(404, res, `Session with name ${company} not found`);
-        }
+        const result = await deleteSessionByName(company);
 
-        const result = await deleteSession(session);
-
-        if (result.success) {
-            return returnSuccess(res, { message: result.message, company, timestamp });
-        } else {
+        if (result.notFound) {
             return returnError(404, res, result.message, { company, timestamp });
         }
+        if (result.success) {
+            return returnSuccess(res, { message: result.message, company, timestamp });
+        }
+        return returnError(500, res, result.message, { company, timestamp });
     } catch (error: any) {
         return returnError(
             500,
