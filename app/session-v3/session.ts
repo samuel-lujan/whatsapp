@@ -119,7 +119,30 @@ export class Session {
 
         const { jid, originalNumber } = await this._validateNumber(number);
 
-        await this.sock.sendMessage(jid, { text: message });
+        const sent = await this.sock.sendMessage(jid, { text: message });
+
+        // Aguarda ACK do servidor WhatsApp (status >= 2 = servidor recebeu)
+        // Necessário pois sendMessage() resolve quando a mensagem é enfileirada localmente,
+        // não quando o servidor confirma. Crítico em sessões novas (PreKey exchange).
+        if (sent?.key) {
+            await new Promise<void>((resolve, reject) => {
+                const cleanup = (err?: Error) => {
+                    clearTimeout(timeout);
+                    this.sock?.ev.off("messages.update", handler);
+                    err ? reject(err) : resolve();
+                };
+                const timeout = setTimeout(() => cleanup(new Error("Timeout aguardando ACK do servidor")), 15_000);
+                const handler = (updates: any[]) => {
+                    for (const u of updates) {
+                        if (u.key?.id === sent.key.id && (u.update?.status ?? 0) >= 2) {
+                            cleanup();
+                            return;
+                        }
+                    }
+                };
+                this.sock!.ev.on("messages.update", handler);
+            });
+        }
 
         this.logger.log(`Mensagem enviada para ${jid}`);
 
