@@ -28,6 +28,11 @@ class SessionManager {
             await this.loadSession(name);
             await new Promise((resolve) => setTimeout(resolve, 8000));
         }
+
+    }
+
+    getSessions(): Record<string, Session> {
+        return this.sessions;
     }
 
     async loadSession(name: string): Promise<void> {

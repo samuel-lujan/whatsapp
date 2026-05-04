@@ -3,6 +3,7 @@ import makeWASocket, {
     fetchLatestBaileysVersion,
     DisconnectReason,
     WASocket,
+    WAVersion,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import path from "path";
@@ -11,8 +12,20 @@ import qrcode from "qrcode";
 import pino from "pino";
 import { Logger } from "../logging";
 import { ContactInfo, MessageData } from "../types";
-import { BAILEYS_AUTH_DIR, PERMANENT_DISCONNECT_CODES } from "./constants";
+import { BAILEYS_AUTH_DIR, DISCONNECT_REASON_LABELS, PERMANENT_DISCONNECT_CODES } from "./constants";
 import { safeDestroyClient, scheduleReconnect } from "./service";
+
+let _cachedVersion: { version: WAVersion; expiresAt: number } | null = null;
+
+async function getWAVersion(): Promise<WAVersion> {
+    const now = Date.now();
+    if (_cachedVersion && now < _cachedVersion.expiresAt) {
+        return _cachedVersion.version;
+    }
+    const { version } = await fetchLatestBaileysVersion();
+    _cachedVersion = { version, expiresAt: now + 60 * 60 * 1000 };
+    return version;
+}
 
 export class Session {
     sock: WASocket | null = null;
@@ -44,7 +57,7 @@ export class Session {
         await fs.promises.mkdir(folder, { recursive: true });
 
         const { state, saveCreds } = await useMultiFileAuthState(folder);
-        const { version } = await fetchLatestBaileysVersion();
+        const version = await getWAVersion();
 
         this.sock = makeWASocket({
             version,
@@ -92,8 +105,9 @@ export class Session {
                 this.lastDisconnectTime = Date.now();
                 this.lastDisconnectReason = String(statusCode ?? "unknown");
 
+                const reasonLabel = DISCONNECT_REASON_LABELS[statusCode] ?? "desconhecido";
                 this.logger.log(
-                    `Conexão fechada. Código: ${statusCode}`,
+                    `Conexão fechada. Código: ${statusCode ?? "?"} (${reasonLabel})`,
                     "onDISCONNECTED",
                 );
 

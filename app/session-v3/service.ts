@@ -118,7 +118,11 @@ export async function scheduleReconnect(session: Session, reason: string): Promi
 
     if (attempt >= RECONNECT_CONFIG.maxAttempts) {
         session.logger.log(`max tentativas (${RECONNECT_CONFIG.maxAttempts}) atingido, desistindo`, tag);
-        await safeDestroyClient(session);
+        // Destroy the current session tracked in the manager (may differ from the original session object)
+        const current = sessionManager.getSession(session.name);
+        if (current) {
+            await safeDestroyClient(current);
+        }
         return;
     }
 
@@ -140,11 +144,12 @@ export async function scheduleReconnect(session: Session, reason: string): Promi
             await safeDestroyClient(session);
             session.logger.log(`criando sessão nova...`, tag);
             await createSession(session.name);
-            await new Promise<void>((resolve) => setTimeout(resolve, 15000));
 
-            const reconnected = sessionManager.getSession(session.name);
-            if (reconnected?.ready) {
-                reconnected.reconnectAttempts = 0;
+            // Poll for connection instead of fixed wait — avoids discarding a session mid-handshake
+            const connected = await _waitForReady(session.name, 30000);
+            if (connected) {
+                const newSession = sessionManager.getSession(session.name);
+                if (newSession) newSession.reconnectAttempts = 0;
                 session.logger.log(`reconectou com sucesso!`, tag);
                 return;
             }
@@ -155,9 +160,27 @@ export async function scheduleReconnect(session: Session, reason: string): Promi
             );
         }
 
+        // Increment on this session object to track total attempts across the reconnect cycle
         session.reconnectAttempts = attempt + 1;
-        await scheduleReconnect(session, reason);
+
+        // Continue with the live session from manager if it exists, otherwise use current object
+        const next = sessionManager.getSession(session.name) ?? session;
+        next.reconnectAttempts = session.reconnectAttempts;
+        await scheduleReconnect(next, reason);
     }, delay);
+}
+
+async function _waitForReady(name: string, timeoutMs: number): Promise<boolean> {
+    const interval = 2000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        const s = sessionManager.getSession(name);
+        if (s?.ready) return true;
+        await new Promise<void>((resolve) => setTimeout(resolve, interval));
+    }
+
+    return false;
 }
 
 export async function createSession(name: string): Promise<Session> {
@@ -203,7 +226,40 @@ export async function deleteSession(session: Session): Promise<{ success: boolea
 
 export async function loadAllSessions(): Promise<string[]> {
     await sessionManager.setup();
+    _startHealthCheck();
     return sessionManager.listSessions();
+}
+
+function _startHealthCheck(): void {
+    const INTERVAL_MS = 3 * 60 * 1000;
+
+    setInterval(async () => {
+        const sessions = sessionManager.getSessions();
+        const names = Object.keys(sessions);
+        if (names.length === 0) return;
+
+        server.log(`[v3] Health check — verificando ${names.length} sessão(ões)`);
+
+        for (const name of names) {
+            const session = sessions[name];
+            if (!session) continue;
+
+            const isGhost =
+                session.sock &&
+                !session.ready &&
+                !session.connecting &&
+                !session.destroying &&
+                !session.reconnectTimer;
+            const isZombie = !session.sock && !session.destroying;
+
+            if (isGhost || isZombie) {
+                server.log(
+                    `[v3] Health check detectou sessão inativa: ${name} (ghost=${isGhost}, zombie=${isZombie})`,
+                );
+                await scheduleReconnect(session, "health-check");
+            }
+        }
+    }, INTERVAL_MS);
 }
 
 export async function listSessions(): Promise<string[]> {
