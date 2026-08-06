@@ -17,7 +17,7 @@
   "description": "",
   "dependencies": {
     "@langchain/langgraph-sdk": "^0.1.10",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "openai": "^6.25.0",

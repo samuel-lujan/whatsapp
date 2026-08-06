@@ -7,7 +7,11 @@ module.exports = {
 
       env: {
         PORT: 8081,
-        NODE_ENV: 'production'
+        NODE_ENV: 'production',
+        // Mantém o heap do V8 abaixo do max_memory_restart do pm2, para que um
+        // vazamento (ex: baileys/makeMutex) gere um restart controlado em vez
+        // de um crash por OOM que derruba todas as sessões de uma vez.
+        NODE_OPTIONS: '--max-old-space-size=3584'
       },
 
       instances: 1,
