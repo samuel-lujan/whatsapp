@@ -117,7 +117,12 @@ export async function scheduleReconnect(session: Session, reason: string): Promi
     const attempt = session.reconnectAttempts || 0;
 
     if (attempt >= RECONNECT_CONFIG.maxAttempts) {
-        session.logger.log(`max tentativas (${RECONNECT_CONFIG.maxAttempts}) atingido, desistindo`, tag);
+        session.logger.error(
+            `max tentativas (${RECONNECT_CONFIG.maxAttempts}) atingido, desistindo`,
+            tag,
+            "",
+            new Error(`Sessão ${session.name} desistiu de reconectar após ${RECONNECT_CONFIG.maxAttempts} tentativas (motivo: ${reason})`),
+        );
         // Destroy the current session tracked in the manager (may differ from the original session object)
         const current = sessionManager.getSession(session.name);
         if (current) {

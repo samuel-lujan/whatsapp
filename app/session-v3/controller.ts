@@ -10,6 +10,8 @@ import {
 import { server } from "../logging";
 import { returnError, returnSuccess } from "../utils";
 
+const reason = (error: unknown): string => (error instanceof Error ? error.message : "Internal server error");
+
 export const getSessionController = (req: Request, res: Response) => {
     const { company } = req.params as { company: string };
     try {
@@ -19,6 +21,7 @@ export const getSessionController = (req: Request, res: Response) => {
         }
         return returnSuccess(res, session);
     } catch (error) {
+        server.error(`❌ [v3] Erro ao obter sessão ${company}: ${reason(error)}`, "", `/v3/session/${company}`, error);
         return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
     }
 };
@@ -53,6 +56,7 @@ export const createSessionController = async (req: Request, res: Response) => {
 
         return returnSuccess(res, session, { response });
     } catch (error) {
+        server.error(`❌ [v3] Erro ao criar sessão ${company}: ${reason(error)}`, "", `/v3/session/${company}`, error);
         return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
     }
 };
@@ -71,6 +75,7 @@ export const deleteSessionController = async (req: Request, res: Response) => {
         }
         return returnError(500, res, result.message, { company, timestamp });
     } catch (error: any) {
+        server.error(`❌ [v3] Erro ao deletar sessão ${company}: ${reason(error)}`, "", `/v3/session/${company}`, error);
         return returnError(
             500,
             res,
@@ -85,6 +90,7 @@ export const loadAllSessionsController = async (req: Request, res: Response) => 
         const sessions = await loadAllSessions();
         return returnSuccess(res, sessions);
     } catch (error) {
+        server.error(`❌ [v3] Erro ao carregar sessões: ${reason(error)}`, "", "/v3/sessions/load", error);
         return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
     }
 };
@@ -94,6 +100,7 @@ export const listSessionsController = async (req: Request, res: Response) => {
         const sessions = await listSessions();
         return returnSuccess(res, sessions);
     } catch (error) {
+        server.error(`❌ [v3] Erro ao listar sessões: ${reason(error)}`, "", "/v3/sessions/", error);
         return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
     }
 };
@@ -126,6 +133,12 @@ export const sendMessageController = async (req: Request, res: Response) => {
 
         return returnSuccess(res, { message: "Message sent successfully", messageSent });
     } catch (error) {
+        server.error(
+            `❌ [v3] Erro ao enviar mensagem para ${company}: ${reason(error)}`,
+            "",
+            `/v3/session/${company}/message`,
+            error,
+        );
         return returnError(500, res, error instanceof Error ? error.message : "Internal server error");
     }
 };

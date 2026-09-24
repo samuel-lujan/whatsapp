@@ -1,5 +1,7 @@
-import dotenv from "dotenv";
-dotenv.config();
+// Precisa ser o PRIMEIRO import: o tsx sobe todos os imports antes do corpo do arquivo, então um
+// `dotenv.config()` chamado depois deles rodaria tarde demais para módulos que leem process.env
+// no import (ex: logging.ts com o token do Rollbar).
+import "dotenv/config";
 
 import http from "node:http";
 import express from "express";
@@ -27,12 +29,11 @@ httpServer.listen(PORT, () => {
 });
 
 // Graceful shutdown - limpa todas as sessoes/Chrome antes de sair
-let isShuttingDown = false;
-process.on("SIGINT", () => gracefulShutdown("SIGINT", isShuttingDown));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM", isShuttingDown));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 process.on("uncaughtException", (err) => {
     server.log(`Excecao nao capturada: ${err.message}`, "FATAL");
     server.error(err.message, "FATAL", "", err);
-    gracefulShutdown("uncaughtException", isShuttingDown);
+    gracefulShutdown("uncaughtException");
 });

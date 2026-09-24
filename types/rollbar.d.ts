@@ -8,13 +8,16 @@ declare module "rollbar" {
     [key: string]: unknown;
   }
 
+  type Callback = (error?: Error | null, response?: unknown) => void;
+
   class Rollbar {
     constructor(options: Configuration);
-    error(error: Error | string, extra?: Record<string, unknown>): void;
-    warn(error: Error | string, extra?: Record<string, unknown>): void;
-    info(error: Error | string, extra?: Record<string, unknown>): void;
-    debug(error: Error | string, extra?: Record<string, unknown>): void;
-    log(error: Error | string, extra?: Record<string, unknown>): void;
+    error(error: Error | string, extra?: Record<string, unknown>, callback?: Callback): void;
+    warn(error: Error | string, extra?: Record<string, unknown>, callback?: Callback): void;
+    info(error: Error | string, extra?: Record<string, unknown>, callback?: Callback): void;
+    debug(error: Error | string, extra?: Record<string, unknown>, callback?: Callback): void;
+    log(error: Error | string, extra?: Record<string, unknown>, callback?: Callback): void;
+    wait(callback: () => void): void;
   }
 
   export = Rollbar;

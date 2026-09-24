@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { server } from "./logging";
+import { flushErrorReports, server } from "./logging";
 import { clearAllSessions } from "./session-v2/service";
 import { Response } from "express";
 
@@ -16,7 +16,11 @@ export function raceWithTimeout<T>(
     ]);
 }
 
-export async function gracefulShutdown(signal: string, isShuttingDown: boolean): Promise<void> {
+// Estado do módulo: antes era um boolean passado por parâmetro (por valor), então a guarda nunca
+// bloqueava chamadas concorrentes (ex: uma cascata de uncaughtException disparava N shutdowns).
+let isShuttingDown = false;
+
+export async function gracefulShutdown(signal: string): Promise<void> {
     const tag = "SHUTDOWN";
     if (isShuttingDown) return;
     isShuttingDown = true;
@@ -37,6 +41,9 @@ export async function gracefulShutdown(signal: string, isShuttingDown: boolean):
         // pkill retorna non-zero se nenhum processo encontrado
         server.log(`Nenhum processo Chrome órfão encontrado para eliminar`, tag);
     }
+
+    // Entrega o report do erro que motivou o shutdown antes de matar o processo
+    await flushErrorReports();
 
     server.log(`Saindo.`, tag);
     process.exit(0);
