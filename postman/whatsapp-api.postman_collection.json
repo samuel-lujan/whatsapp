@@ -1,0 +1,151 @@
+{
+  "info": {
+    "name": "WhatsApp Multi-Tenant API",
+    "description": "Collection baseada na branch comeback (PR #38). Todas as rotas exigem Authorization: Bearer {{AUTH_TOKEN}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:8081",
+      "description": "Base URL do servidor (develop: 8081, produção: 8080)"
+    },
+    {
+      "key": "AUTH_TOKEN",
+      "value": "sua-chave-secreta",
+      "description": "Valor da variável AUTH_TOKEN do .env"
+    },
+    {
+      "key": "COMPANY",
+      "value": "minha-empresa",
+      "description": "Slug da empresa/sessão"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{AUTH_TOKEN}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "Listar sessões ativas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/v2/sessions/",
+              "host": ["{{BASE_URL}}"],
+              "path": ["v2", "sessions", ""]
+            },
+            "description": "Retorna array com todas as sessões atualmente em memória."
+          }
+        },
+        {
+          "name": "Carregar sessões do disco",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/v2/sessions/load",
+              "host": ["{{BASE_URL}}"],
+              "path": ["v2", "sessions", "load"]
+            },
+            "description": "Reidrata sessões persistidas em .wwebjs_auth no disco."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Session",
+      "item": [
+        {
+          "name": "Obter sessão",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/v2/session/{{COMPANY}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["v2", "session", "{{COMPANY}}"]
+            },
+            "description": "Retorna os dados da sessão da empresa. Retorna 404 se não existir."
+          }
+        },
+        {
+          "name": "Criar / Restaurar sessão",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/v2/session/{{COMPANY}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["v2", "session", "{{COMPANY}}"]
+            },
+            "description": "Cria ou restaura uma sessão da empresa.\n\nResponstas possíveis:\n- Sessão já existia → retorna sessão ativa\n- Sessão conectada → `connected: true`\n- Sessão não conectada → `qrCode` para escanear com o WhatsApp"
+          }
+        },
+        {
+          "name": "Criar sessão com IA",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/v2/ai/session/{{COMPANY}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["v2", "ai", "session", "{{COMPANY}}"]
+            },
+            "description": "Mesmo fluxo da criação normal, porém com `hasAi=true` habilitado na sessão.\n\nRequer as variáveis de IA configuradas no .env."
+          }
+        },
+        {
+          "name": "Deletar sessão",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/v2/session/{{COMPANY}}",
+              "host": ["{{BASE_URL}}"],
+              "path": ["v2", "session", "{{COMPANY}}"]
+            },
+            "description": "Remove a sessão da memória e faz logout/cleanup do cliente WhatsApp.\n\nRetorna 404 se a sessão não existir."
+          }
+        },
+        {
+          "name": "Enviar mensagem",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": \"5511999999999\",\n  \"message\": \"Olá! Esta é uma mensagem de teste.\",\n  \"customName\": \"Cliente Demo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/v2/session/{{COMPANY}}/message",
+              "host": ["{{BASE_URL}}"],
+              "path": ["v2", "session", "{{COMPANY}}", "message"]
+            },
+            "description": "Envia uma mensagem para um número via a sessão da empresa.\n\nParâmetros do body:\n- `number` (string, obrigatório): número no formato DDI+DDD+número, ex: 5511999999999\n- `message` (string, obrigatório): texto da mensagem\n- `customName` (string, opcional): nome customizado do destinatário para logs\n\nRetorna 422 se a sessão não estiver conectada."
+          }
+        }
+      ]
+    }
+  ]
+}

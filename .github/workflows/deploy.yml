@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -20,10 +25,12 @@ jobs:
           USER: ${{ secrets.USER_DEPLOY }}
         with:
           args: |
-            cd /var/www/whatsapp
-            git add .
-            git reset --hard
-            git pull origin master
-            npm install
-            pm2 restart all
+            set -e
+            cd /var/www/whatsapp-2
+            PREVIOUS=$(git rev-parse HEAD)
+            git fetch origin master
+            git checkout -f -B master origin/master
+            if ! git diff --quiet "$PREVIOUS" HEAD -- package-lock.json; then npm ci; fi
+            pm2 startOrReload ecosystem.config.js --update-env
+            pm2 save
             exit

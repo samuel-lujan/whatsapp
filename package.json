@@ -4,8 +4,12 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon --exec node --trace-warnings ./app/index.js",
-    "start": "node ./app/index.js"
+    "dev": "nodemon --exec tsx --trace-warnings ./app/index.ts",
+    "start": "tsx ./app/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"app/**/*.ts\"",
+    "format:check": "prettier --check \"app/**/*.ts\""
   },
   "keywords": [],
   "author": "",
@@ -13,14 +17,27 @@
   "description": "",
   "dependencies": {
     "@langchain/langgraph-sdk": "^0.1.10",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "openai": "^6.25.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "redis": "^4.7.1",
     "rollbar": "^2.26.4",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main"
+    "socket.io": "^4.8.3",
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "@types/qrcode": "^1.5.6",
+    "nodemon": "^3.1.10",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "whatsapp-rust-bridge": "0.5.5"
   }
 }
