@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log*
+.git
+.gitignore
+.vscode
+.wwebjs_auth
+.wwebjs_cache
+.env
+coverage
+*.tsbuildinfo
