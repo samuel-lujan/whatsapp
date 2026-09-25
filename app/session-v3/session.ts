@@ -4,6 +4,8 @@ import makeWASocket, {
     DisconnectReason,
     WASocket,
     WAVersion,
+    WAMessageStatus,
+    generateMessageIDV2,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import path from "path";
@@ -25,6 +27,22 @@ async function getWAVersion(): Promise<WAVersion> {
     const { version } = await fetchLatestBaileysVersion();
     _cachedVersion = { version, expiresAt: now + 60 * 60 * 1000 };
     return version;
+}
+
+const WA_REJECTION_REASONS: Record<string, string> = {
+    "463": "conta restrita ou sem token de privacidade para o contato",
+    "479": "sessão de criptografia do destinatário obsoleta",
+};
+
+export class WhatsAppRejectionError extends Error {
+    code: string;
+
+    constructor(code: string) {
+        const reason = WA_REJECTION_REASONS[code] ?? "motivo não mapeado";
+        super(`WhatsApp rejeitou a mensagem (código ${code}: ${reason})`);
+        this.name = "WhatsAppRejectionError";
+        this.code = code;
+    }
 }
 
 export class Session {
@@ -63,7 +81,7 @@ export class Session {
             version,
             auth: state,
             printQRInTerminal: false,
-            logger: pino({ level: "silent" }),
+            logger: pino({ level: "warn" }).child({ session: this.name }),
             browser: ["WhatsApp-Lujan", "Chrome", "1.0.0"],
             connectTimeoutMs: 60_000,
             defaultQueryTimeoutMs: 30_000,
@@ -133,30 +151,44 @@ export class Session {
 
         const { jid, originalNumber } = await this._validateNumber(number);
 
-        const sent = await this.sock.sendMessage(jid, { text: message });
+        // ID gerado antes do envio para registrar o listener antes da resposta do servidor chegar
+        const messageId = generateMessageIDV2(this.sock.user?.id);
+        const sock = this.sock;
 
-        // Aguarda ACK do servidor WhatsApp (status >= 2 = servidor recebeu)
-        // Necessário pois sendMessage() resolve quando a mensagem é enfileirada localmente,
-        // não quando o servidor confirma. Crítico em sessões novas (PreKey exchange).
-        if (sent?.key) {
-            await new Promise<void>((resolve, reject) => {
-                const cleanup = (err?: Error) => {
-                    clearTimeout(timeout);
-                    this.sock?.ev.off("messages.update", handler);
-                    err ? reject(err) : resolve();
-                };
-                const timeout = setTimeout(() => cleanup(new Error("Timeout aguardando ACK do servidor")), 15_000);
-                const handler = (updates: any[]) => {
-                    for (const u of updates) {
-                        if (u.key?.id === sent.key.id && (u.update?.status ?? 0) >= 2) {
-                            cleanup();
-                            return;
-                        }
+        // Aguarda confirmação (status >= 2) ou rejeição do servidor (status ERROR).
+        // sendMessage() resolve quando a mensagem é enfileirada localmente, não quando o servidor
+        // aceita. Quando o servidor rejeita (ex: 463 conta restrita, 479 sessão de device obsoleta),
+        // o Baileys emite messages.update com status ERROR e o código em messageStubParameters.
+        const confirmation = new Promise<void>((resolve, reject) => {
+            const cleanup = (err?: Error) => {
+                clearTimeout(timeout);
+                sock.ev.off("messages.update", handler);
+                err ? reject(err) : resolve();
+            };
+            const timeout = setTimeout(() => cleanup(new Error("Timeout aguardando ACK do servidor")), 15_000);
+            const handler = (updates: any[]) => {
+                for (const u of updates) {
+                    if (u.key?.id !== messageId) continue;
+
+                    const status = u.update?.status;
+                    if (status === WAMessageStatus.ERROR) {
+                        const code = String(u.update?.messageStubParameters?.[0] ?? "desconhecido");
+                        cleanup(new WhatsAppRejectionError(code));
+                        return;
                     }
-                };
-                this.sock!.ev.on("messages.update", handler);
-            });
-        }
+                    if ((status ?? 0) >= WAMessageStatus.SERVER_ACK) {
+                        cleanup();
+                        return;
+                    }
+                }
+            };
+            sock.ev.on("messages.update", handler);
+        });
+        // Evita unhandled rejection caso sendMessage() lance antes de aguardarmos a confirmação
+        confirmation.catch(() => {});
+
+        await sock.sendMessage(jid, { text: message }, { messageId });
+        await confirmation;
 
         this.logger.log(`Mensagem enviada para ${jid}`);
 

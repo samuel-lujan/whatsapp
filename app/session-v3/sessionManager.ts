@@ -25,7 +25,17 @@ class SessionManager {
 
         const valid = activeSessions.filter((name): name is string => Boolean(name));
         for (const name of valid) {
-            await this.loadSession(name);
+            // Uma sessão com erro não pode impedir que as seguintes sejam carregadas
+            try {
+                await this.loadSession(name);
+            } catch (error) {
+                server.error(
+                    `❌ [v3] Erro ao restaurar sessão ${name}: ${error instanceof Error ? error.message : String(error)}`,
+                    "SETUP",
+                    "setup",
+                    error,
+                );
+            }
             await new Promise((resolve) => setTimeout(resolve, 8000));
         }
 

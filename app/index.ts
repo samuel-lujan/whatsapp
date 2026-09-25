@@ -10,6 +10,7 @@ import { errorHandler } from "./session-v2/errorHandler";
 import { server } from "./logging";
 import { gracefulShutdown } from "./utils";
 import { initSocketServer } from "./socket";
+import { loadSessionsOnBoot } from "./session-v3/service";
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -26,6 +27,18 @@ initSocketServer(httpServer);
 httpServer.listen(PORT, () => {
     server.log(`Servidor multi-tenant WhatsApp rodando na porta ${PORT}`);
     server.jumpLineLog(`Pressione Ctrl+C para parar o servidor`);
+
+    // Restaura as sessões salvas a cada boot (deploy, restart do pm2, reboot da VPS),
+    // sem depender de alguém chamar GET /v3/sessions/load manualmente. Protegido contra crash loop
+    // pelo bootGuard.
+    loadSessionsOnBoot().catch((error) => {
+        server.error(
+            `❌ [v3] Erro ao carregar sessões no boot: ${error?.message ?? error}`,
+            "",
+            "boot",
+            error,
+        );
+    });
 });
 
 // Graceful shutdown - limpa todas as sessoes/Chrome antes de sair

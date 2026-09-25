@@ -1,7 +1,8 @@
-import { Session } from "./session";
+import { Session, WhatsAppRejectionError } from "./session";
 import { raceWithTimeout } from "../utils";
 import { Logger, server } from "../logging";
 import { sessionManager } from "./sessionManager";
+import { markLoadCompleted, registerBootLoad } from "./bootGuard";
 import { BAILEYS_AUTH_DIR, QR_TIMEOUT_MS, RECONNECT_CONFIG } from "./constants";
 import { MessageData } from "../types";
 import path from "path";
@@ -229,16 +230,43 @@ export async function deleteSession(session: Session): Promise<{ success: boolea
     };
 }
 
+// Boot e GET /v3/sessions/load podem se sobrepor: quem chega depois aguarda a carga em andamento
+// em vez de criar um segundo socket para uma sessão que ainda está conectando.
+let loadingAll: Promise<void> | null = null;
+let healthCheckTimer: NodeJS.Timeout | null = null;
+
 export async function loadAllSessions(): Promise<string[]> {
-    await sessionManager.setup();
+    if (!loadingAll) {
+        loadingAll = sessionManager.setup().finally(() => {
+            loadingAll = null;
+        });
+    }
+    await loadingAll;
     _startHealthCheck();
+    markLoadCompleted();
     return sessionManager.listSessions();
 }
 
+export async function loadSessionsOnBoot(): Promise<void> {
+    if (!registerBootLoad()) {
+        server.error(
+            `❌ [v3] Carga automática de sessões desativada: os últimos boots caíram antes de estabilizar. ` +
+                `Verifique nos logs a última "Restaurando sessão" antes do crash e chame GET /v3/sessions/load para reativar.`,
+            "BOOT_GUARD",
+            "boot",
+            new Error("Crash loop na carga de sessões"),
+        );
+        return;
+    }
+    await loadAllSessions();
+}
+
 function _startHealthCheck(): void {
+    if (healthCheckTimer) return;
+
     const INTERVAL_MS = 3 * 60 * 1000;
 
-    setInterval(async () => {
+    healthCheckTimer = setInterval(async () => {
         const sessions = sessionManager.getSessions();
         const names = Object.keys(sessions);
         if (names.length === 0) return;
@@ -293,6 +321,16 @@ export const sendMessageService = async (
             throw error;
         }
 
+        // 463 = conta restrita: reenviar conta como nova tentativa de contato e agrava a restrição
+        if (error instanceof WhatsAppRejectionError && error.code === "463") {
+            return {
+                success: false,
+                message: "Mensagem rejeitada pelo WhatsApp",
+                errorMessage: error.message,
+                data: null,
+            };
+        }
+
         const healthCheck = await sessionManager.verifySessionHealth(session.name);
 
         if (healthCheck.healthy) {
@@ -300,7 +338,7 @@ export const sendMessageService = async (
             await new Promise<void>((resolve) => setTimeout(resolve, 1000));
 
             try {
-                const retryData: MessageData = await session.sendMessage(number, message);
+                const retryData: MessageData = await session.sendMessage(number, message, customName);
                 return {
                     success: true,
                     message: "Mensagem enviada com sucesso após retry",
